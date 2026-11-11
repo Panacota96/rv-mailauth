@@ -1,0 +1,19 @@
+{
+  "forge_version": 1,
+  "profile": "rust",
+  "name": "rv-mailauth",
+  "module": "rv_mailauth",
+  "title": "RV MailAuth",
+  "run_command": "scan",
+  "planned_command": "analyze",
+  "case_role": "analysis",
+  "created": "2026-11-11",
+  "cli_command": [
+    "cargo",
+    "run",
+    "-q",
+    "-p",
+    "rv-mailauth-cli",
+    "--"
+  ]
+}
