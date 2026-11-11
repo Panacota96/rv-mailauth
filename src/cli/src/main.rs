@@ -425,6 +425,10 @@ struct ScanArgs {
 }
 
 fn main() -> ExitCode {
+    // `<exe> worker …`: one message analysed in an isolated child process (see core worker.rs).
+    if std::env::args_os().nth(1).is_some_and(|a| a == "worker") {
+        std::process::exit(rv_mailauth_core::worker::worker_main());
+    }
     let cli = Cli::parse();
     ExitCode::from(match cli.command {
         Command::Scan(a) => scan(*a),
@@ -527,6 +531,9 @@ fn scan(a: ScanArgs) -> u8 {
         case_dir: a.case_dir.clone(),
         evidence_ids,
         case_role: CASE_ROLE,
+        // Email-analysis options (--dkim-keys, --online, --own-domain, --extract-attachments, worker
+        // isolation): defaults until the CLI exposes them.
+        domain: Default::default(),
     };
 
     let bar = match a.progress {

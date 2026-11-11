@@ -48,7 +48,7 @@
     "none": "Ninguno",
     "unknown": "desconocido",
     "method": "Método",
-    "method_text": "Cada archivo se abrió en modo solo lectura, se calculó su hash en una sola pasada con los algoritmos seleccionados y se comparó con una tabla de firmas de archivo. Cada acción quedó registrada en un log de auditoría encadenado por hashes.",
+    "method_text": "Cada archivo se leyó una vez para calcular sus huellas y después se analizó como correo: .eml como mensaje RFC 5322, .msg a través de sus propiedades MAPI y cada mensaje de un mbox como elemento propio, en un proceso aislado con límites de tiempo y memoria. Se leyeron y compararon la sección de cabeceras, los saltos Received y las fechas; las firmas DKIM y ARC se verificaron sin conexión con las claves públicas suministradas por el perito (sin consulta DNS salvo en modo en línea); las cabeceras Authentication-Results se registraron como declaraciones; se calculó el hash de los adjuntos; y heurísticas de BEC compararon las direcciones con los dominios propios de la organización. Cada paso y cada archivo escrito queda en el registro de auditoría encadenado por hash.",
     "conclusion": "Conclusión",
     "what_we_did": "Qué hicimos",
     "what_we_found": "Qué encontramos",
@@ -91,7 +91,38 @@
     "mismatched": "Distintos del registro",
     "unregistered": "No registrados",
     "intake_date": "Registrado en la recepción (UTC)",
-    "case_dir": "Carpeta del caso"
+    "case_dir": "Carpeta del caso",
+    "mail_section": "Análisis del correo",
+    "mail_message_id": "Message-ID",
+    "mail_from": "Remitente (From)",
+    "mail_reply_to": "Responder a (Reply-To)",
+    "mail_return_path": "Return-Path",
+    "mail_subject": "Asunto",
+    "mail_date": "Cabecera Date",
+    "mail_hops": "Saltos Received (primer servidor = 1)",
+    "mail_hop": "Salto",
+    "mail_hop_from": "Desde",
+    "mail_hop_by": "Recibido por",
+    "mail_hop_date": "Fecha registrada",
+    "mail_dkim": "Firmas DKIM (verificación sin conexión)",
+    "mail_dkim_domain": "Dominio (d=)",
+    "mail_dkim_selector": "Selector (s=)",
+    "mail_dkim_algorithm": "Algoritmo",
+    "mail_dkim_result": "Resultado",
+    "mail_key_source": "Origen de la clave",
+    "mail_dkim_mode": "Modo DKIM / archivo de claves",
+    "mail_dkim_not_evaluated": "DKIM no evaluado",
+    "mail_arc": "Cadena ARC",
+    "mail_auth_results": "Authentication-Results (según declaran los servidores)",
+    "mail_attachments": "Adjuntos",
+    "mail_attachment_name": "Nombre",
+    "mail_attachment_type": "Tipo",
+    "mail_attachment_size": "Tamaño (bytes)",
+    "mail_outputs": "Archivos escritos por el análisis",
+    "mail_mbox_message": "Mensaje en mbox",
+    "mail_mbox_messages": "Mensajes en este mbox",
+    "mail_not_completed": "El análisis del mensaje no terminó.",
+    "mail_none": "ninguno"
   },
   "severity": {
     "high": "Alta",
@@ -139,13 +170,129 @@
       "title": "La ruta registrada contiene ahora otro contenido",
       "shows": "Esta ruta se registró antes como %{previous_id} con otro contenido; el contenido actual recibe un nuevo ID de evidencia.",
       "does_not_prove": "Cuál versión es la original ni por qué cambió el contenido."
+    },
+    "DKIM_BODY_HASH_MISMATCH": {
+      "title": "El hash del cuerpo DKIM no coincide",
+      "shows": "La firma DKIM de %{d} (selector %{s}) registra un hash del cuerpo del mensaje distinto del hash del cuerpo actual: el cuerpo no es el que se firmó.",
+      "does_not_prove": "No indica quién cambió el cuerpo, cuándo ni por qué: reenvíos, listas de correo, pies de antivirus y la recodificación por un cliente de correo también cambian el cuerpo después de la firma."
+    },
+    "DKIM_SIGNATURE_INVALID": {
+      "title": "La firma DKIM no se verifica",
+      "shows": "El cuerpo coincide con la firma DKIM de %{d} (selector %{s}), pero la firma de los campos de cabecera firmados no se verifica con la clave pública suministrada (origen de la clave: %{key_source}; verificador: %{reason}).",
+      "does_not_prove": "No indica que se falsificara una cabecera: una clave suministrada que no es la usada en el momento del envío (las claves rotan) o una cabecera reescrita en tránsito dan el mismo resultado."
+    },
+    "DKIM_KEY_FROM_CURRENT_DNS": {
+      "title": "Clave DKIM tomada del DNS actual",
+      "shows": "La clave de %{d} (selector %{s}) no estaba en el archivo de claves del perito y se obtuvo del DNS en el momento del análisis (modo en línea).",
+      "does_not_prove": "Una clave publicada hoy puede no ser la que firmó el mensaje; un resultado válido o inválido con ella no dice nada seguro sobre la clave vigente en el momento del envío."
+    },
+    "DKIM_DOMAIN_NOT_ALIGNED": {
+      "title": "Firma DKIM válida de otro dominio",
+      "shows": "El mensaje solo tiene una firma DKIM válida de %{d}, que no comparte dominio organizativo con el dominio del remitente (From) %{from_domain}.",
+      "does_not_prove": "Los servicios de envío, las listas de correo y el correo externalizado suelen firmar con su propio dominio; no indica que el remitente se suplantara."
+    },
+    "ARC_CHAIN_INVALID": {
+      "title": "La cadena ARC no se valida",
+      "shows": "El mensaje tiene %{instances} conjunto(s) ARC y la cadena no se valida (%{reason}).",
+      "does_not_prove": "Un intermediario puede haber roto la cadena, o no se suministraron las claves de los selladores; no indica que el mensaje se manipulara."
+    },
+    "RECEIVED_TIME_NOT_MONOTONIC": {
+      "title": "Las horas de Received retroceden",
+      "shows": "El salto %{hop} se fechó %{hop_date}, %{earlier_by_s} s antes del salto anterior %{previous_hop} (%{previous_date}), más allá de la diferencia de reloj tolerada (%{count} paso(s) así).",
+      "does_not_prove": "Los relojes de los servidores a veces fallan y algunos servidores añaden cabeceras Received fuera de orden; no indica que se insertara o editara una cabecera."
+    },
+    "DATE_AFTER_FIRST_HOP": {
+      "title": "Cabecera Date posterior al primer servidor",
+      "shows": "La cabecera Date (%{date}) es %{later_by_s} s posterior a la hora en que el primer servidor recibió el mensaje (%{first_hop_date}).",
+      "does_not_prove": "El reloj del remitente puede estar mal; no indica que la fecha se cambiara después del envío."
+    },
+    "MSG_TRANSPORT_HEADERS_MISSING": {
+      "title": "Mensaje de Outlook sin cabeceras de transporte",
+      "shows": "El archivo .msg no tiene la propiedad PR_TRANSPORT_MESSAGE_HEADERS: la sección de cabeceras original (saltos Received, firmas DKIM, Authentication-Results) no está disponible, por lo que no se intentó DKIM.",
+      "does_not_prove": "Los borradores, los elementos enviados y los mensajes guardados por algunas herramientas nunca tuvieron estas cabeceras; no indica que se eliminaran."
+    },
+    "ATTACHMENT_DATE_AFTER_SENT": {
+      "title": "Adjunto con fecha posterior al mensaje",
+      "shows": "La fecha de %{field} del adjunto %{attachment} (%{attachment_date}) es posterior a la fecha (Date) del mensaje (%{date}).",
+      "does_not_prove": "Estas fechas las escribe el cliente que envía y es fácil que estén mal o se fijen libremente; no indica que el adjunto se sustituyera."
+    },
+    "LOOKALIKE_DOMAIN": {
+      "title": "Dominio parecido a un dominio propio",
+      "shows": "El dominio de %{header} %{domain} (%{domain_unicode}) se parece al dominio propio %{own_domain} (método: %{method}).",
+      "does_not_prove": "Nombres parecidos también pertenecen a organizaciones legítimas sin relación; no indica intención de engañar."
+    },
+    "REPLY_TO_DIFFERS": {
+      "title": "Las respuestas van a otra organización",
+      "shows": "La dirección %{header} %{address} no comparte dominio organizativo con el dominio del remitente %{from_domain}.",
+      "does_not_prove": "Mesas de ayuda, listas de correo, envíos masivos y la gestión de rebotes usan legítimamente otras direcciones; no indica que se desvíen las respuestas."
+    },
+    "DISPLAY_NAME_SPOOF": {
+      "title": "El nombre visible sugiere otro remitente",
+      "shows": "El nombre visible \"%{display_name}\" de %{address} contiene otra dirección o el nombre de la organización propia, aunque la dirección es externa (%{reason}).",
+      "does_not_prove": "Los nombres se escriben libremente y los socios mencionan la organización con la que trabajan; no indica suplantación."
+    },
+    "FILE_STRUCTURE_DAMAGED": {
+      "title": "Estructura del archivo dañada o incompleta",
+      "shows": "La estructura %{format} no está completa o no está bien formada (%{problems}); se analizó lo que se pudo leer.",
+      "does_not_prove": "Las copias truncadas, las exportaciones interrumpidas y los programas no estándar también lo causan; no indica un daño deliberado."
+    },
+    "PARSER_FAILED": {
+      "title": "Análisis del mensaje no completado",
+      "shows": "El análisis de este mensaje no terminó (motivo: %{reason}, código de salida %{exit_code}); faltan sus hallazgos de correo.",
+      "does_not_prove": "No indica que el archivo sea malicioso o esté dañado; los límites de tamaño o de tiempo y un contenido inusual también detienen un análisis."
+    },
+    "DKIM_NOT_SIGNED": {
+      "title": "Sin firma DKIM",
+      "shows": "El mensaje no tiene cabecera DKIM-Signature.",
+      "does_not_prove": "Muchos servidores legítimos no firman y la ausencia de firma es habitual; no demuestra nada sobre la autenticidad en ningún sentido."
+    },
+    "DKIM_SIGNATURE_NOT_EVALUATED": {
+      "title": "Firma DKIM no evaluada",
+      "shows": "La firma DKIM de %{d} (selector %{s}) no pudo evaluarse (%{reason}).",
+      "does_not_prove": "Una firma caducada, no soportada o parcial (l=), o un archivo .msg que no guarda el cuerpo original, no puede comprobarse; no dice nada del mensaje."
+    },
+    "TIMEZONE_INCONSISTENT": {
+      "title": "Zona horaria incoherente",
+      "shows": "La cabecera Date usa la zona %{date_zone} mientras que el primer servidor de la organización remitente usó %{hop_zone} (%{reason}).",
+      "does_not_prove": "Clientes y servidores suelen estar en zonas distintas y quien viaja conserva su zona; no indica que se editara la fecha."
+    },
+    "MESSAGE_ID_DOMAIN_MISMATCH": {
+      "title": "Message-ID de otro dominio",
+      "shows": "El Message-ID se generó bajo %{message_id_domain}, no bajo el dominio del remitente %{from_domain}.",
+      "does_not_prove": "Los clientes de correo, los servicios de envío y los proveedores de webmail generan Message-ID con su propio nombre; no indica que el mensaje sea falso."
+    },
+    "DKIM_KEY_NOT_AVAILABLE": {
+      "title": "Clave DKIM no disponible",
+      "shows": "No se suministró la clave pública de %{name}, por lo que no pudo comprobarse la firma de %{d} (selector %{s}) (análisis sin conexión, sin consulta DNS).",
+      "does_not_prove": "No dice nada de la firma; suministre la clave vigente en el momento del envío para comprobarla."
+    },
+    "PAYMENT_DETAILS_MENTIONED": {
+      "title": "Se mencionan datos de pago",
+      "shows": "El asunto o el texto mencionan datos de pago: %{terms}.",
+      "does_not_prove": "Las facturas y los avisos de pago mencionan datos bancarios constantemente; es una indicación para revisar, no un signo de fraude."
+    },
+    "DKIM_SIGNATURE_VALID": {
+      "title": "La firma DKIM se verifica",
+      "shows": "La firma DKIM de %{d} (selector %{s}, %{a}) se verifica con la clave de %{key_source}: los campos de cabecera firmados y el cuerpo no han cambiado desde la firma.",
+      "does_not_prove": "Solo indica que quien tenía la clave privada de %{d} firmó este contenido; no indica quién lo escribió, que el remitente sea veraz ni que las cabeceras no firmadas sean originales."
+    },
+    "AUTH_RESULTS_RECORDED": {
+      "title": "Comprobaciones del servidor receptor registradas",
+      "shows": "%{count} cabecera(s) Authentication-Results; la superior, escrita por %{authserv_id}, declara: %{results}.",
+      "does_not_prove": "Son afirmaciones escritas en el mensaje por un servidor; cualquiera que manejara el archivo pudo añadirlas o editarlas, y no se volvieron a comprobar."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "La detección de tipo usa una tabla limitada de firmas comunes; los tipos desconocidos se reportan como desconocidos, no como sospechosos.",
     "TIMESTAMPS_FROM_FILESYSTEM": "Las fechas de modificación provienen del sistema de archivos de la copia examinada y pueden diferir de la fuente original.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un resultado sin hallazgos no prueba que un archivo sea auténtico ni que no haya sido alterado antes de su adquisición.",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un sello de tiempo confiable prueba que el log de auditoría existía en esta forma exacta en la hora indicada; no prueba que la copia examinada coincida con la fuente original."
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un sello de tiempo confiable prueba que el log de auditoría existía en esta forma exacta en la hora indicada; no prueba que la copia examinada coincida con la fuente original.",
+    "DKIM_NEEDS_KEY_AT_SENDING_TIME": "Los resultados DKIM dependen de las claves públicas suministradas: una comprobación solo tiene sentido con la clave vigente cuando se envió el mensaje. Las claves rotan, así que una clave actual puede fallar con un mensaje auténtico y una clave ausente deja la firma sin comprobar.",
+    "MISSING_SIGNATURE_PROVES_NOTHING": "La ausencia de firma DKIM es habitual y no demuestra nada; una firma válida cubre solo los campos de cabecera firmados y el cuerpo, no quién escribió el mensaje.",
+    "MSG_MAY_LACK_TRANSPORT_HEADERS": "Los archivos .msg de Outlook no conservan el mensaje original: el cuerpo se recodifica (por lo que DKIM no puede comprobarse) y la sección de cabeceras original solo se conserva si se guardaron las cabeceras de transporte.",
+    "BEC_HEURISTICS_FALSE_POSITIVES": "Las comprobaciones de dominios parecidos, Reply-To, nombre visible y términos de pago son heurísticas con falsos positivos y falsos negativos; el dominio organizativo se estima sin la Public Suffix List completa.",
+    "HEADERS_ARE_CLAIMS": "Las cabeceras Received, Date y Authentication-Results son texto escrito por servidores y clientes; las cabeceras no firmadas pueden añadirlas o editarlas quienes manejaron el archivo.",
+    "MBOX_ESCAPING_AMBIGUOUS": "En un mbox, las líneas del cuerpo que empiezan por \"From \" se escapan con '>'; el desescapado sigue la variante elegida (mboxrd por defecto) y no siempre puede restaurar la línea original, lo que puede afectar al hash del cuerpo DKIM."
   },
   "brand": {
     "descriptor": "FORENSE | RESPUESTA A INCIDENTES | SEGURIDAD",

@@ -21,10 +21,16 @@ pub const SCHEMA_TECHNICAL: &str = "rakvor.item-technical/1";
 pub const SCHEMA_SUMMARY: &str = "rakvor.item-summary/1";
 
 /// Run-level limitations, always printed (what this tool cannot tell you).
-pub const LIMITATIONS: [&str; 4] = [
-    "SIGNATURE_TABLE_LIMITED",
-    "TIMESTAMPS_FROM_FILESYSTEM",
+pub const LIMITATIONS: [&str; 10] = [
+    "DKIM_NEEDS_KEY_AT_SENDING_TIME",
+    "MISSING_SIGNATURE_PROVES_NOTHING",
+    "MSG_MAY_LACK_TRANSPORT_HEADERS",
+    "BEC_HEURISTICS_FALSE_POSITIVES",
+    "HEADERS_ARE_CLAIMS",
+    "MBOX_ESCAPING_AMBIGUOUS",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY",
+    "TIMESTAMPS_FROM_FILESYSTEM",
+    "SIGNATURE_TABLE_LIMITED",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY",
 ];
 pub const SCHEMA_CUSTODY: &str = "rakvor.item-custody/1";
@@ -107,6 +113,21 @@ pub struct ItemResult {
     /// registered | already_registered | verified | mismatch | not_in_registry
     pub case_status: Option<String>,
     pub intake_utc: Option<String>,
+    /// Domain data from the analysis (Analysis::details) and the files it wrote (with digests).
+    pub details: serde_json::Value,
+    pub outputs: Vec<OutputRecord>,
+    /// Set for one message of an mbox: `path` is then `<mbox path>#<n>@<offset>` (not a file), the hashes are
+    /// those of the stored message bytes, and the custody of the bytes is the custody of the mbox file.
+    pub message: Option<crate::model::MboxMessageRef>,
+}
+
+/// A file written by the analysis, after the pipeline hashed and audited it.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct OutputRecord {
+    pub rel_path: String,
+    pub kind: String,
+    pub bytes: u64,
+    pub hashes: BTreeMap<String, String>,
 }
 
 impl ItemResult {

@@ -420,6 +420,7 @@ impl GuiState {
             },
             evidence_ids: vec![],
             case_role: CASE_ROLE,
+            domain: Default::default(),
         })
     }
 
