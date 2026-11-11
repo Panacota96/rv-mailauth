@@ -8,18 +8,23 @@ here=$(cd "$(dirname "$0")" && pwd)
 bin=${1:-rv-mailauth}
 out=${RV_SAMPLE_OUT:-"$here/out"}
 "$bin" self-test
-# Expected exit code 0: one medium finding (extension mismatch) and one duplicate pair, no high finding.
-"$bin" scan --input "$here/evidence" --hash sha256,md5 --lang all --case DEMO-001 --actor "Sample" --out "$out" --progress none
+# Expected exit code 3: the sample set contains tampered messages (high findings); 0-3 are completed runs.
+# The email options (DKIM key file, own domains) of expected_findings.json are added once the CLI has them.
+rc=0
+"$bin" scan --input "$here/evidence" --hash sha256,md5 --lang all --case DEMO-001 --actor "Sample" --out "$out" --progress none || rc=$?
+[ "$rc" -le 3 ] || exit "$rc"
 run=$(ls "$out/logs" | tail -n 1)
 "$bin" verify-log "$out/logs/$run"
 # Compare the tool's hash register with expected_hashes.csv: same files, sizes, SHA-256 and MD5.
 # hashes.csv: index,path,size,<algorithms>,status,error (path may be quoted); fields are read from the right.
+# Messages of an mbox are listed after it as <mbox>#<n>@<offset> (parts of a file, not files): skipped here.
 awk -F, '
   FNR == 1 { if (FILENAME ~ /expected_hashes\.csv$/) { for (i = 1; i <= NF; i++) e[$i] = i } else { for (i = 1; i <= NF; i++) h[$i] = i; hn = NF }; next }
   FILENAME ~ /expected_hashes\.csv$/ { want[$e["file"]] = $e["size"] "," $e["sha256"] "," $e["md5"]; n++; next }
   {
     path = $0; sub(/^[0-9]+,/, "", path); sub(/,[0-9]+,[^,]*,[^,]*,[^,]*,[^,]*$/, "", path)
     gsub(/"/, "", path); sub(/.*[\/\\]/, "", path)
+    if (path ~ /#[0-9]+@[0-9]+$/) next
     got[path] = $(NF - hn + h["size"]) "," $(NF - hn + h["sha256"]) "," $(NF - hn + h["md5"])
     m++
   }

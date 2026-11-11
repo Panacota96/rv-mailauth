@@ -59,7 +59,7 @@ fn test_pki(dir: &Path) -> Option<(TsaServer, String)> {
 }
 
 fn sample() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/inventory")
 }
 
 fn only_dir(p: &Path) -> PathBuf {
@@ -328,7 +328,7 @@ fn sample_script_compares_the_hash_register() {
     let text = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{}", text);
     assert!(
-        text.contains("hashes.csv matches expected_hashes.csv (3 files"),
+        text.contains("hashes.csv matches expected_hashes.csv (16 files"),
         "{}",
         text
     );

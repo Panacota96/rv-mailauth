@@ -1,0 +1,28 @@
+Received: from smtp.example.org (smtp.example.org [192.0.2.25]) by mx.acme.example with ESMTPS id 7F; Thu, 12 Nov 2026 12:00:03 +0000
+From: Bruno Proveedor <bruno@example.org>
+To: Ana Compras <ana@acme.example>
+Subject: Documentación
+Date: Thu, 12 Nov 2026 13:00:00 +0100
+Message-ID: <20261112130000.14@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b13"
+
+--b13
+Content-Type: text/plain; charset=utf-8
+
+Adjunto la documentación.
+--b13
+Content-Type: application/pdf; name="doc.pdf"
+Content-Disposition: attachment; filename="doc.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUK
+JSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0
+aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVy
+IGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBz
+eW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMg
+ZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxp
+bmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50
+aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmls
+bGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGVyIGxpbmUK
+JSBzeW50aGV0aWMgZmlsbGVyIGxpbmUKJSBzeW50aGV0aWMgZmlsbGV

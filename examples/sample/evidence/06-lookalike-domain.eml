@@ -1,0 +1,14 @@
+Return-Path: <tesoreria@acrne.example>
+Received: from mail.acrne.example (mail.acrne.example [198.51.100.7]) by mx.acme.example with ESMTP id 9C01; Wed, 11 Nov 2026 08:10:06 +0000
+From: Tesorería <tesoreria@acrne.example>
+To: Ana Compras <ana@acme.example>
+Subject: Factura pendiente
+Date: Wed, 11 Nov 2026 08:10:00 +0000
+Message-ID: <a1@acrne.example>
+Content-Type: text/plain; charset=utf-8
+
+Ana,
+
+necesitamos que revises la factura pendiente hoy.
+
+Tesorería

@@ -1,0 +1,87 @@
+{
+  "description": "Exact finding codes (sorted) per evidence file — and per mbox message as '<file>#<n>' — for a run over examples/sample/evidence with the options below (paths relative to the repository root). Written by tests/make_samples.py from the construction of each sample, not from a run.",
+  "options": {
+    "dkim_keys": "examples/sample/dkim-keys.txt",
+    "own_domains": [
+      "acme.example"
+    ]
+  },
+  "args": [
+    "--dkim-keys",
+    "examples/sample/dkim-keys.txt",
+    "--own-domain",
+    "acme.example"
+  ],
+  "exit_code": 3,
+  "files": {
+    "01-clean-rsa.eml": [
+      "AUTH_RESULTS_RECORDED",
+      "DKIM_SIGNATURE_VALID"
+    ],
+    "02-clean-ed25519.eml": [
+      "DKIM_SIGNATURE_VALID"
+    ],
+    "03-body-edited.eml": [
+      "DKIM_BODY_HASH_MISMATCH"
+    ],
+    "04-header-edited.eml": [
+      "DKIM_SIGNATURE_INVALID"
+    ],
+    "05-rotated-key.eml": [
+      "DKIM_SIGNATURE_INVALID"
+    ],
+    "06-lookalike-domain.eml": [
+      "DKIM_NOT_SIGNED",
+      "LOOKALIKE_DOMAIN"
+    ],
+    "07-reply-to-trap.eml": [
+      "DKIM_SIGNATURE_VALID",
+      "REPLY_TO_DIFFERS"
+    ],
+    "08-display-name-spoof.eml": [
+      "DISPLAY_NAME_SPOOF",
+      "DKIM_NOT_SIGNED"
+    ],
+    "09-payment-details.eml": [
+      "DKIM_SIGNATURE_VALID",
+      "PAYMENT_DETAILS_MENTIONED"
+    ],
+    "10-transport-headers.msg": [
+      "AUTH_RESULTS_RECORDED",
+      "DKIM_SIGNATURE_NOT_EVALUATED"
+    ],
+    "11-no-transport-headers.msg": [
+      "MSG_TRANSPORT_HEADERS_MISSING"
+    ],
+    "12-mailbox.mbox": [],
+    "12-mailbox.mbox#1": [
+      "DKIM_SIGNATURE_VALID"
+    ],
+    "12-mailbox.mbox#2": [
+      "DKIM_BODY_HASH_MISMATCH"
+    ],
+    "12-mailbox.mbox#3": [
+      "DATE_AFTER_FIRST_HOP",
+      "DKIM_NOT_SIGNED",
+      "MESSAGE_ID_DOMAIN_MISMATCH",
+      "RECEIVED_TIME_NOT_MONOTONIC",
+      "TIMEZONE_INCONSISTENT"
+    ],
+    "13-truncated.eml": [
+      "DKIM_NOT_SIGNED",
+      "FILE_STRUCTURE_DAMAGED"
+    ],
+    "14-not-aligned-attachment-date.eml": [
+      "ATTACHMENT_DATE_AFTER_SENT",
+      "DKIM_DOMAIN_NOT_ALIGNED",
+      "DKIM_SIGNATURE_VALID"
+    ],
+    "15-forwarded-unknown-key.eml": [
+      "ARC_CHAIN_INVALID",
+      "DKIM_KEY_NOT_AVAILABLE"
+    ],
+    "16-truncated.msg": [
+      "FILE_STRUCTURE_DAMAGED"
+    ]
+  }
+}

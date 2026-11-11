@@ -48,7 +48,7 @@
     "none": "None",
     "unknown": "unknown",
     "method": "Method",
-    "method_text": "Each file was read once to compute its digests, then analysed as email: .eml as an RFC 5322 message, .msg through its MAPI properties, and each message of an mbox as an item of its own, in an isolated worker process with time and memory limits. The header section, Received hops and dates were read and compared; DKIM and ARC signatures were verified offline with the public keys the examiner supplied (no DNS query unless online mode was chosen); Authentication-Results were recorded as stated evidence; attachments were hashed; and BEC heuristics compared the addresses with the organisation's own domains. Every step and every file written is recorded in the hash-chained audit log.",
+    "method_text": "Each file was read once to compute its digests, then analysed as email: .eml as an RFC 5322 message, .msg through its MAPI properties, and each message of an mbox as an item of its own (each in a separate worker process with time and memory limits when worker isolation is on, as recorded in the audit log). The header section, Received hops and dates were read and compared; DKIM and ARC signatures were verified offline with the public keys the examiner supplied (no DNS query unless online mode was chosen); Authentication-Results were recorded as stated evidence; attachments were hashed; and BEC heuristics compared the addresses with the organisation's own domains. Every step and every file written is recorded in the hash-chained audit log.",
     "conclusion": "Conclusion",
     "what_we_did": "What we did",
     "what_we_found": "What we found",

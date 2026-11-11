@@ -7,15 +7,17 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $out = Join-Path $here "out"
 & $Bin self-test; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-# Expected exit code 0: one medium finding (extension mismatch) and one duplicate pair, no high finding.
+# Expected exit code 3: the sample set contains tampered messages (high findings); 0-3 are completed runs.
+# The email options (DKIM key file, own domains) of expected_findings.json are added once the CLI has them.
 & $Bin scan --input (Join-Path $here "evidence") --hash sha256,md5 --lang all --case DEMO-001 --actor "Sample" --out $out --progress none
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3) { exit $LASTEXITCODE }
 $run = Get-ChildItem (Join-Path $out "logs") | Sort-Object Name | Select-Object -Last 1
 & $Bin verify-log $run.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # Compare the tool's hash register (logs\<RUN-ID>\hashes.csv) with the independently computed
 # expected_hashes.csv: same files, sizes, SHA-256 and MD5. Any difference fails the script (exit 3).
 $expected = Import-Csv (Join-Path $here "expected_hashes.csv")
-$register = Import-Csv (Join-Path $run.FullName "hashes.csv")
+# Messages of an mbox are listed after it as <mbox>#<n>@<offset> (parts of a file, not files): skipped here.
+$register = Import-Csv (Join-Path $run.FullName "hashes.csv") | Where-Object { $_.path -notmatch '#\d+@\d+$' }
 $bad = 0
 if ($register.Count -ne $expected.Count) {
   Write-Host "MISMATCH: the tool hashed $($register.Count) files, expected_hashes.csv lists $($expected.Count)"

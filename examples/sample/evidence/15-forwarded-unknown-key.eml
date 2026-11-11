@@ -1,0 +1,29 @@
+Return-Path: <bruno@example.org>
+Received: from smtp.example.org (smtp.example.org [192.0.2.25]) by mx.acme.example with ESMTPS id 4F2A1; Thu, 12 Nov 2026 15:00:06 +0000
+ARC-Seal: i=1; a=rsa-sha256; cv=none; d=forwarder.example.net; s=arc1; t=1794495600; b=dGVzdA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=forwarder.example.net; s=arc1; t=1794495600; h=from:to:subject; bh=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=; b=dGVzdA==
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org;
+ i=@example.org; q=dns/txt; s=s2019; t=1794437788; h=from : to :
+ subject : date : message-id : mime-version : content-type :
+ content-transfer-encoding : from;
+ bh=YqV5IVehD2fv0/ivjYGqIPvB8oDmsqyOuLr4uoZmWUc=;
+ b=bEppzJGY+E+lWbvncDbvFo2b2vYaTW8/zp7NEDHAo43gdxj80U/XNbT9T53L5I2lpYksY
+ iYDNOFrTdHuSwjk8R2fXFMVZ/idpw4qTO6V1dkA63lVXg1ISs1dfoqyDWrrGtWpv2ASJAbX
+ 5Iohss00JxYvyS2xaW55yvc/iiTj0GaJICiEtkoytEA+/Jq+FSkqSBj/rRPWGrmeALovCZc
+ h6/OGI0Ix4HPd2N0N06FxBbVIhvZRxNhSk5t9ZEZrpqUhRznKsIPMeXM993UBnUmEv3d2Yj
+ 4DWPGBD9qdjl88UBcl7qWZtsO2gXCHOTqoG3wk9cJvHLYpL0CETsai27v9VA==
+Received: from [192.0.2.10] (laptop.example.org) by smtp.example.org with ESMTPSA id 77B1 for <ana@acme.example>; Thu, 12 Nov 2026 16:00:00 +0100
+From: Bruno Proveedor <bruno@example.org>
+To: Ana Compras <ana@acme.example>
+Subject: Reenvío: horario
+Date: Thu, 12 Nov 2026 16:00:00 +0100
+Message-ID: <20261112160000.16@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Ana,
+
+el horario sigue igual.
+
+Bruno

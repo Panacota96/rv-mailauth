@@ -3,6 +3,7 @@
 //!
 //! HTML and PDF are rendered from the same view model (`*_context`), so they never disagree.
 
+pub mod mailview;
 pub mod pdf;
 
 use crate::analyzer::{Finding, Severity};
@@ -436,6 +437,7 @@ pub fn item_context(lang: &str, run: &RunInfo, it: &ItemResult, audit: &AuditRef
         "audit".into(),
         json!({"head": audit.head, "entries": audit.entries, "log_dir": audit.log_dir}),
     );
+    m.insert("mail".into(), mailview::mail_view(c, it));
     Value::Object(m)
 }
 
@@ -523,6 +525,7 @@ pub fn technical_json(run: &RunInfo, it: &ItemResult) -> Value {
         "findings": findings_json(it, &run.langs),
         "limitations": LIMITATIONS,
         "audit": {"first_seq": it.audit_first_seq, "last_seq": it.audit_last_seq},
+        "email": mailview::mail_json(it),
     })
 }
 
@@ -814,6 +817,15 @@ pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
                 (t("does_not_prove"), s(x, "does_not_prove")),
             ],
         });
+    }
+    for sec in arr(&ctx["mail"], "sections") {
+        b.push(Block::Heading(s(sec, "title")));
+        b.push(Block::Kv(
+            arr(sec, "rows")
+                .iter()
+                .map(|r| (s(r, "k"), s(r, "v")))
+                .collect(),
+        ));
     }
     b.push(Block::Heading(t("method")));
     b.push(Block::Para(t("method_text")));

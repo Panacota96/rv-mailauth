@@ -1312,7 +1312,7 @@ mod tests {
     }
 
     fn sample_copy(dir: &Path) -> PathBuf {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/inventory");
         let ev = dir.join("evidence");
         std::fs::create_dir_all(&ev).unwrap();
         for e in std::fs::read_dir(src).unwrap() {
