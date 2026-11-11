@@ -238,7 +238,7 @@ restriction is not enforced by the OS; on a connected workstation, a Windows Fir
 
 | Item | Version |
 | --- | --- |
-| Rust | Pinned by [rust-toolchain.toml](../rust-toolchain.toml): **1.97.0** with rustfmt and clippy; `rustup` installs and selects it automatically inside the source tree. `Cargo.toml` declares `rust-version = "1.88"` (edition 2024) as the minimum. To match a release exactly, use the compiler recorded in that release's `environment.json` → `tool.rustc` (e.g. `rustc 1.97.0 (2d8144b78 2026-07-07)`). |
+| Rust | Pinned by [rust-toolchain.toml](../rust-toolchain.toml): **1.99.1** with rustfmt and clippy; `rustup` installs and selects it automatically inside the source tree. `Cargo.toml` declares `rust-version = "1.98"` (edition 2024) as the minimum. To match a release exactly, use the compiler recorded in that release's `environment.json` → `tool.rustc` (e.g. `rustc 1.99.1 (58cf8f9c3 2026-10-13)`). |
 | Windows linker | Visual Studio 2022 Build Tools, workload *Desktop development with C++* (MSVC + Windows SDK); target `x86_64-pc-windows-msvc`. Static CRT is set in `.cargo/config.toml`. |
 | Linux | No system packages needed to build the CLI. |
 | Optional | Python 3.12 with `blake3 jsonschema pyhanko` for the independent verifiers and the trust tests (`RV_TEST_PYTHON=python`). |
@@ -249,7 +249,7 @@ restriction is not enforced by the OS; on a connected workstation, a Windows Fir
 git clone https://github.com/Panacota96/rv-mailauth.git
 cd rv-mailauth
 git checkout v0.1.0                       # the tag of the release under review
-rustc --version                           # must print the pinned 1.97.0
+rustc --version                           # must print the pinned 1.99.1
 cargo build --release --locked -p rv-mailauth-cli -p rv-mailauth-gui
 .\target\release\rv-mailauth.exe self-test
 .\examples\sample\run.ps1 -Bin .\target\release\rv-mailauth.exe
@@ -338,4 +338,4 @@ The same script compares this build with the Python profile of the tool (measure
 | `self-test` prints `FAIL` | Do not use this build for evidence; re-download and repeat steps 2–4. |
 | Sample summary differs from step 6 | Wrong version or modified sample files; compare `environment.json` with the release notes and the sample digests with `expected_hashes.csv`. |
 | GUI window blank or very slow on a VM | No GPU driver: software rendering is used; give the VM more CPU. |
-| Building from source downloads another compiler | Expected: rustup installs the pinned 1.97.0 from `rust-toolchain.toml`. Offline, install it beforehand (`rustup toolchain install 1.97.0 --profile minimal`). |
+| Building from source downloads another compiler | Expected: rustup installs the pinned 1.99.1 from `rust-toolchain.toml`. Offline, install it beforehand (`rustup toolchain install 1.99.1 --profile minimal`). |
