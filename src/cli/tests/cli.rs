@@ -841,6 +841,20 @@ fn case_folder_intake_verify_case_and_tampering() {
             })),
         );
     bin().arg("verify-case").arg(&case).assert().code(0);
+    // A review log (GUI viewer) of a run in the case is verified and counted by verify-case.
+    rv_mailauth_core::review::append(
+        &run_logs,
+        "ci",
+        "ui_message_viewed",
+        serde_json::json!({"index": 1}),
+    )
+    .unwrap();
+    bin()
+        .arg("verify-case")
+        .arg(&case)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("review entries: 1"));
     bin()
         .args(["verify-case", "--rehash"])
         .arg(&case)

@@ -115,7 +115,7 @@ Options:
           Folders are reviewed one level deep unless --recursive is given. Symbolic links are not
           followed.
           Default: none (required unless --input-list, --case-dir or --evidence is given).
-          Example: --input D:\evidence --input E:\phone-export\chat.txt
+          Example: --input D:\evidence --input E:\export\invoice.eml
 
   -L, --input-list <FILE>
           Text file with one path per line (bulk review). Lines starting with # are ignored.
@@ -683,6 +683,8 @@ CHECKS:
     tokens: imprint and TSA signature; the TSA chain is not checked, use verify-log
     --tsa-ca), its case_linked entry points to its run_started entry, and the audit head
     recorded at run_finished is its final entry (only timestamp_obtained may follow);
+  - every run's review.jsonl (messages opened in the GUI viewer after the run), when present,
+    is an intact chain anchored to that run's run_finished entry ("review entries: N");
   - with --rehash: every registered item still reachable at its registered path is read again
     and its digests are compared with the registry (the latest registration of a path).
 
