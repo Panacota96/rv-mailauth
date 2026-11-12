@@ -283,7 +283,7 @@ pub fn import(a: ImportArgs) -> u8 {
     }
     if a.output.exists() {
         eprintln!(
-            "error: {} already exists: choose another --output (an imported key file is never overwritten)",
+            "error: {} already exists: choose another --key-file (an imported key file is never overwritten)",
             a.output.display()
         );
         return EXIT_ERROR;

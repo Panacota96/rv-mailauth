@@ -498,7 +498,9 @@ fn keys_import_writes_a_normalised_key_file_and_audits_the_import() {
         .arg(&out)
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("already exists"));
+        .stderr(predicate::str::contains(
+            "already exists: choose another --key-file",
+        ));
 }
 
 #[test]
