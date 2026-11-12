@@ -28,7 +28,7 @@ sequenceDiagram
 ## Contents
 
 - [1. Before you start](#1-before-you-start)
-- [2. Case walkthrough](#2-case-walkthrough)
+- [2. Case walkthrough](#2-case-walkthrough) (incl. [RV Hub and `describe --json`](#26-starting-from-rv-hub---case-dir-and-describe---json))
 - [3. Reading the outputs](#3-reading-the-outputs)
 - [4. Interpreting each finding](#4-interpreting-each-finding)
 - [5. Working without a case folder](#5-working-without-a-case-folder)
@@ -138,6 +138,32 @@ After two messages were opened in the viewer, both commands add a line: `review 
 anchored to run_finished)` for `verify-log`, `review entries: 2` for `verify-case`. rv-hashinv 0.3.1's `verify-case` also
 accepts the folder (shared case code; it does not print review entries). Then hand over the case folder, the key file and its import
 log.
+
+### 2.6 Starting from RV Hub: `--case-dir` and `describe --json`
+
+RV Hub (the Rakvor launcher) finds the installed tools, opens them on a case folder and suggests which one fits a
+file. It relies on two entry points of RV MailAuth:
+
+- **`rv-mailauth-gui.exe --case-dir <CASE> [FILES...]`** starts the desktop app with **Case folder** already filled
+  (`--case-dir=<CASE>` also works). Other arguments are pre-loaded as evidence, as when files are dropped on the
+  icon. The preset is written to the run's audit log as `ui_case_dir_from_launcher` followed by
+  `ui_case_dir_changed`; a `--case-dir` without a folder is ignored, shown in the window and logged as
+  `ui_launch_argument_ignored`.
+- **`rv-mailauth describe --json`** prints one JSON object (sorted keys) that RV Hub reads; it is hidden from
+  `rv-mailauth --help` but listed in [usage-cli.md](usage-cli.md). It reads and writes nothing. Schema:
+  [`schemas/describe.schema.json`](../schemas/describe.schema.json) (`rakvor.describe/1`, identical in every Rakvor
+  tool).
+
+| Field | Value for rv-mailauth |
+| --- | --- |
+| `schema` | `rakvor.describe/1` |
+| `tool`, `title`, `version` | `rv-mailauth`, `RV MailAuth`, the product version (`version.txt`) |
+| `role` | `analysis` (verifies evidence against the registry; never writes it) |
+| `main_verb` | `analyze` |
+| `accepts` | extensions `eml`, `mbox`, `msg`; signatures `d0cf11e0a1b11ae1` at offset 0 (`.msg`, OLE compound file) and `46726f6d20` (`From `) at offset 0 (mbox) |
+| `case_formats`, `log_formats` | `rakvor.case/1`; `rakvor.audit/1` = `logs/audit.jsonl`, `rakvor.review/1` = `logs/review.jsonl` |
+| `cli_exe`, `gui_exe` | `rv-mailauth.exe`, `rv-mailauth-gui.exe` |
+| `exit_codes` | The meaning of 0, 1, 2, 3 and 130 (table in section 9) |
 
 ## 3. Reading the outputs
 
