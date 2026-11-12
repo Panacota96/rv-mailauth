@@ -192,6 +192,20 @@ fn samples_give_exactly_the_expected_findings_and_dkimpy_agrees() {
             );
             assert!(j["derived_from"]["message_offset"].as_u64().unwrap() > 0);
         }
+        // headers.json (written by the worker) cites the same source.
+        let h: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("headers.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            h["locator"]["mbox"]["container_hashes"]["sha256"],
+            mbox_sha.as_str()
+        );
+        assert!(
+            h["locator"]["mbox"]["container_path"]
+                .as_str()
+                .unwrap()
+                .ends_with("12-mailbox.mbox")
+        );
         for f in ["technical.en.html", "custody.en.html", "custody.es.html"] {
             let h = std::fs::read_to_string(dir.join(f)).unwrap();
             assert!(h.contains(&mbox_sha), "{f} does not cite the mbox digest");

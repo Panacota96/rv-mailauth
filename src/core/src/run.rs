@@ -1054,6 +1054,8 @@ fn message_item(
         }
     }
     if r.error.is_none() {
+        // The worker gets the reference WITH the mbox's path and digests, so headers.json cites its source.
+        let cited = r.message.clone();
         let a = analyze_recorded(
             cfg,
             log,
@@ -1062,7 +1064,7 @@ fn message_item(
             &mut r,
             head,
             &container.path,
-            Some(m),
+            cited.as_ref().or(Some(m)),
         )?;
         r.detected_type = a.detected_type;
         r.extension = container.extension.clone();

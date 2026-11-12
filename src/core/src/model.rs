@@ -92,6 +92,21 @@ pub const FINDING_CODES: &[(&str, Severity)] = &[
     ("AUTH_RESULTS_RECORDED", Severity::Info),
 ];
 
+/// Codes of the shared forensic pipeline (inventory of non-email files, read errors, duplicates, case folder),
+/// with the severity `analyzer.rs` and `run.rs` give them. Together with [`FINDING_CODES`] this is every code
+/// of the i18n catalogues; `docs/reports.md` lists both (tests/docs_catalogue.rs keeps it in step).
+/// REGISTRY_PATH_CONTENT_CHANGED is emitted by intake tools only, never by this analysis tool.
+pub const PIPELINE_FINDING_CODES: &[(&str, Severity)] = &[
+    ("EVIDENCE_HASH_MISMATCH_WITH_CASE", Severity::High),
+    ("EXECUTABLE_CONTENT", Severity::High),
+    ("UNREADABLE", Severity::High),
+    ("EVIDENCE_NOT_IN_CASE_REGISTRY", Severity::Medium),
+    ("EXTENSION_MISMATCH", Severity::Medium),
+    ("REGISTRY_PATH_CONTENT_CHANGED", Severity::Medium),
+    ("DUPLICATE", Severity::Info),
+    ("EMPTY_FILE", Severity::Info),
+];
+
 /// Severity of a known code (panics in debug builds on an unknown code, so a typo cannot ship).
 pub fn severity_of(code: &str) -> Severity {
     match FINDING_CODES.iter().find(|(c, _)| *c == code) {
@@ -151,8 +166,12 @@ pub struct MboxMessageRef {
     pub from_line: String,
     pub id: String,
     /// The mbox the message comes from (the registered evidence) and its digests from this run's hashing
-    /// pass, so every derived message item cites its source: mbox hash + index + byte offset.
+    /// pass, so every derived message item cites its source: mbox hash + index + byte offset. Empty (and
+    /// left out of the JSON) in `mbox_index.json`, which is written before the messages are hashed and names
+    /// the mbox once at its top.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub container_path: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub container_hashes: BTreeMap<String, String>,
 }
 
