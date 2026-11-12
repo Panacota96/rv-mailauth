@@ -4,7 +4,7 @@
   "name": "rv-mailauth",
   "module": "rv_mailauth",
   "title": "RV MailAuth",
-  "run_command": "scan",
+  "run_command": "analyze",
   "planned_command": "analyze",
   "case_role": "analysis",
   "created": "2026-11-11",
@@ -15,5 +15,11 @@
     "-p",
     "rv-mailauth-cli",
     "--"
+  ],
+  "sample_args": [
+    "--dkim-keys",
+    "examples/sample/dkim-keys.txt",
+    "--own-domain",
+    "acme.example"
   ]
 }

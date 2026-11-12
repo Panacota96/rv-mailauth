@@ -8,7 +8,7 @@ use std::path::Path;
 const TOOL: &str = "rv-mailauth";
 const TITLE: &str = "RV MailAuth";
 const ROLE: &str = "analysis";
-const MAIN_VERB: &str = "scan";
+const MAIN_VERB: &str = "analyze";
 const LOG_FORMATS: &[&str] = &["rakvor.audit/1"];
 
 fn root() -> &'static Path {
@@ -58,6 +58,22 @@ fn describe_prints_the_tool_contract() {
     assert_eq!(v["log_formats"], serde_json::json!(LOG_FORMATS));
     assert_eq!(v["cli_exe"], format!("{}.exe", TOOL));
     assert_eq!(v["gui_exe"], format!("{}-gui.exe", TOOL));
+    // Email files: by extension, and .msg (OLE compound file) and mbox ("From ") by signature.
+    assert_eq!(
+        v["accepts"]["extensions"],
+        serde_json::json!(["eml", "mbox", "msg"])
+    );
+    let formats: Vec<&str> = v["accepts"]["signatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["format"].as_str().unwrap())
+        .collect();
+    assert_eq!(formats, ["msg", "mbox"]);
+    assert_eq!(
+        v["accepts"]["signatures"][0]["match"][0]["hex"],
+        "d0cf11e0a1b11ae1"
+    );
     // main_verb is a real command.
     Command::cargo_bin(TOOL)
         .unwrap()

@@ -1,8 +1,11 @@
 //! rv-mailauth command-line interface. All work happens in `rv_mailauth_core`; this file only
 //! parses arguments, renders events (progress bar or JSON Lines) and maps results to exit codes.
 
+mod keys;
+
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use rv_mailauth_core::model::{DomainOptions, Isolation};
 use rv_mailauth_core::trust::{self, DEFAULT_TSA};
 use rv_mailauth_core::{
     CASE_ROLE, Event, HashAlgo, RunConfig, TOOL_NAME, TOOL_VERSION, audit, case, hash, i18n, run,
@@ -20,84 +23,202 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_FINDINGS: u8 = 3;
 const EXIT_CANCELLED: u8 = 130;
 
-const ABOUT: &str = "Inventory digital evidence: hash every file with one or two algorithms, detect its real type, flag anomalies and write court-ready reports with a tamper-evident audit log.";
+const ABOUT: &str = "Look for signals that an email (.eml, .msg, .mbox) was altered or is not what it claims: offline DKIM/ARC, Received hops, dates, attachments and BEC signals, with court-ready reports and a tamper-evident audit log.";
 
 const LONG_ABOUT: &str = "\
 DESCRIPTION:
-  rv-mailauth reviews a single file, a whole folder (bulk) or a list of files. For every file it:
+  rv-mailauth looks for signals that an email was altered after it was sent or is not what it
+  claims to be. It reads .eml (RFC 5322), Outlook .msg and .mbox files (every message of an mbox
+  is an item of its own): a single file, a whole folder (bulk) or a list of files. For each one:
     1. opens the file read-only and hashes it in one pass with one or two algorithms;
-    2. detects the real file type from its signature (magic bytes);
-    3. flags empty files, extensions that do not match the content, programs hidden under
-       another name and duplicated content;
-    4. writes a technical report and a customer-friendly summary (HTML, PDF and JSON).
-  Each run also writes a statistics report and an audit trail under <OUT>/logs/<RUN-ID>/.
-  Every action is appended to a hash-chained log that `rv-mailauth verify-log` can check later.
+    2. parses the headers: From, Sender, Reply-To, Return-Path, Message-ID, Date, every Received
+       hop and Authentication-Results (headers.json); for .msg, the stored transport headers;
+    3. verifies every DKIM signature and the ARC chain OFFLINE with the public keys you supply
+       (--dkim-keys); nothing is looked up on the network unless you add --online (dkim.json);
+    4. checks the Received hops against each other and against Date (order, time zones,
+       --clock-skew), the Message-ID domain and the MIME structure;
+    5. lists the attachments with their SHA-256 and embedded dates (--extract-attachments also
+       copies them out);
+    6. flags business-email-compromise (BEC) signals: lookalike domains and display names that
+       imitate --own-domain, Reply-To/Return-Path at another organisation, payment-details wording;
+    7. writes a technical review and a customer summary (HTML, PDF and JSON).
+  Each message is parsed in a separate worker process with a time and memory limit (--isolation),
+  so a hostile message cannot stop a bulk run. Each run also writes a statistics report and an
+  audit trail under <OUT>/logs/<RUN-ID>/; every action is appended to a hash-chained log that
+  `rv-mailauth verify-log` can check later. The result is a set of signals for an examiner, never
+  a verdict that a message is authentic or forged.
 
-  CASE FOLDER (--case-dir): Rakvor tools share one folder per case. rv-mailauth is the intake tool: it
-  registers every hashed file in evidence/registry.json (evidence ids E0001, E0002, ...) so later tools
-  can prove they examined bit-identical copies. `rv-mailauth verify-case <CASE>` checks it all.";
+  CASE FOLDER (--case-dir): Rakvor tools share one folder per case. rv-hashinv, the intake tool,
+  registers each evidence file once (evidence ids E0001, E0002, ...). rv-mailauth is an analysis
+  tool: before analysing a file it re-hashes it and verifies it against that registry, so the
+  reports prove the examined file is bit-identical to the registered one. `rv-mailauth
+  verify-case <CASE>` checks the whole case.";
 
-const SCAN_AFTER_HELP: &str = "\
+const ANALYZE_AFTER_HELP: &str = "\
 EXAMPLES:
-  Review one file (SHA-256, English reports):
-    rv-mailauth scan --input evidence/contract.pdf
-  Review a folder and its subfolders with SHA-256 + MD5, Spanish reports, for case CASE-2026-014:
-    rv-mailauth scan -i D:\\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014
+  Review one message offline with the sender's archived DKIM key (SHA-256, English reports):
+    rv-mailauth analyze --input evidence/invoice.eml --dkim-keys keys/example-org-2026.txt
+  Review a folder and its subfolders with SHA-256 + MD5, Spanish reports, our own domain:
+    rv-mailauth analyze -i D:\\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014 \\
+      --dkim-keys case-keys.txt --own-domain acme.example
   Review the files listed in a text file, reports in the three languages, machine-readable progress:
-    rv-mailauth scan --input-list files.txt --lang all --progress jsonl > events.jsonl
-  Verify the audit log afterwards:
+    rv-mailauth analyze --input-list files.txt --lang all --progress jsonl > events.jsonl
+  Large mbox: copy the attachments out, reports only for flagged messages:
+    rv-mailauth analyze -i E:\\export\\inbox.mbox --extract-attachments --item-reports flagged
+  Turn archived DNS records into a key file first; verify the audit log afterwards:
+    rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
     rv-mailauth verify-log rakvor-out/logs/<RUN-ID>/audit.jsonl
-  Open a case folder and register the evidence (intake), then verify the whole case:
-    rv-mailauth scan -i D:\\evidence -r --case-dir E:\\CASE-014 --case CASE-014 --jurisdiction fr
+  Analyse every item registered in a case folder (after rv-hashinv intake), then verify the case:
+    rv-mailauth analyze --case-dir E:\\CASE-014 --dkim-keys E:\\CASE-014\\keys.txt
     rv-mailauth verify-case E:\\CASE-014
-  Re-examine two registered items of the case:
-    rv-mailauth scan --case-dir E:\\CASE-014 --evidence E0001,E0002
+  Analyse two registered items of the case only:
+    rv-mailauth analyze --case-dir E:\\CASE-014 --evidence E0001,E0002
 
 EXIT CODES:
   0    Completed; no high-severity finding.
   1    Runtime error (input not found, output not writable, case log locked, ...).
        See the audit log.
-  2    Usage error (unknown option, more than two hash algorithms, unsupported language).
-       With --case-dir: folder of another case or schema, --case missing when creating the
-       case, unknown evidence id.
-  3    Completed with at least one high-severity finding (e.g. unreadable file, program under
-       another name, evidence that differs from the case registry), or the case folder fails
-       verification (nothing is written to it).
+  2    Usage error (unknown option, more than two hash algorithms, unsupported language, a
+       --dkim-keys file that cannot be read, an invalid --own-domain). With --case-dir: folder
+       of another case or schema, --case missing when creating the case, unknown evidence id.
+  3    Completed with at least one high-severity finding (e.g. a DKIM body hash that no longer
+       matches the body, evidence that differs from the case registry), or the case folder
+       fails verification (nothing is written to it).
   130  Cancelled with Ctrl+C. Partial reports and the cancellation are written to the audit log.
 
 FILES WRITTEN:
-  <OUT>/logs/<RUN-ID>/audit.jsonl         Hash-chained log of every action (one JSON object per line).
-  <OUT>/logs/<RUN-ID>/audit.log           The same actions, human-readable.
-  <OUT>/logs/<RUN-ID>/hashes.csv          Hash register: index, path, size, digests, status.
-  <OUT>/logs/<RUN-ID>/environment.json    Tool and dependency versions, OS, host, user, command line.
-  <OUT>/reports/<RUN-ID>/statistics.json  Run statistics (+ statistics.<LANG>.html and .pdf).
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/technical.json|.<LANG>.html|.<LANG>.pdf   Technical review.
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/summary.json|.<LANG>.html|.<LANG>.pdf     Customer summary.
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/custody.json|.<es|fr>.html|.pdf|.en.html|.pdf  Custody form.
-  <OUT>/logs/<RUN-ID>/timestamp-<SEQ>.tsr|.json  RFC 3161 token for the audit chain head.
-  With --case-dir <CASE>, logs/ and reports/ go to <CASE>/runs/rv-mailauth/<RUN-ID>/, plus:
-  <CASE>/case.json                        Case id, jurisdiction, creation (written once).
-  <CASE>/case-log.jsonl                   Hash-chained case log of every tool: case_created,
-                                          run_started, evidence_registered, run_finished.
-  <CASE>/evidence/registry.json|.csv      Evidence registry: E0001..., path, size, hashes.
+  <OUT>/logs/<RUN-ID>/audit.jsonl          Hash-chained log of every action (one JSON object/line).
+  <OUT>/logs/<RUN-ID>/audit.log            The same actions, human-readable.
+  <OUT>/logs/<RUN-ID>/hashes.csv           Hash register: index, path, size, digests, status; the
+                                           messages of an mbox as <MBOX>#<n>@<offset>.
+  <OUT>/logs/<RUN-ID>/environment.json     Tool and dependency versions, OS, host, user, arguments.
+  <OUT>/logs/<RUN-ID>/timestamp-<SEQ>.tsr  RFC 3161 token for the audit chain head (+ .json).
+  <OUT>/reports/<RUN-ID>/statistics.json   Run statistics (+ statistics.<LANG>.html and .pdf).
+  <ITEM> = <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>; message n of an mbox, found at byte
+           <offset>, is the item <NNNNN>-<NAME>_<n>_<offset> (a folder of its own):
+  <ITEM>/headers.json                      Parsed headers, Received hops, Authentication-Results,
+                                           .msg properties.
+  <ITEM>/dkim.json                         Every DKIM signature and the ARC chain: result, key
+                                           source (key file line or current DNS), alignment.
+  <ITEM>/attachments/NNN-<NAME>            --extract-attachments: each attachment, decoded.
+  <ITEM>/mbox_index.json                   mbox only: every message with its offset and length.
+  <ITEM>/technical.json|.<LANG>.html|.pdf  Technical review (findings, headers, DKIM, attachments).
+  <ITEM>/summary.json|.<LANG>.html|.pdf    Customer summary.
+  <ITEM>/custody.json|.<es|fr|en>.html|.pdf  Chain-of-custody form.
+  Every file under <ITEM> is hashed with the selected algorithms and recorded in the audit log.
+  With --item-reports flagged, items without findings above info get no technical, summary or
+  custody files (each skip is audited).
+  With --case-dir <CASE>, logs/ and reports/ go to <CASE>/runs/rv-mailauth/<RUN-ID>/, and:
+  <CASE>/case-log.jsonl                    Hash-chained case log of every tool: run_started and
+                                           run_finished of this run are appended to it.
+  <CASE>/case.json                         Case id and jurisdiction (only if the folder is new).
+  The evidence registry (<CASE>/evidence/registry.json) is read, never written, by rv-mailauth.
 
 FORENSIC NOTES:
-  - Evidence is opened read-only and never modified; modification times are compared before and after.
-  - Work on a verified copy (write-blocked image or export), not on original media.
+  - Evidence is opened read-only and never modified; modification times are compared before and
+    after. Work on a verified copy (write-blocked image or export), not on original media.
+  - Findings are signals, not a verdict: a message without findings is not proven authentic, and
+    a finding does not prove forgery. Read \"What it does not prove\" and the Limitations section.
+  - DKIM shows that the signed headers and body are unchanged since a holder of the domain's
+    signing key signed them. It does not show who wrote the message, that the display name is
+    truthful, that unsigned headers are original, or when the message was sent. A message that
+    passes can still be fraud sent from a real (compromised or lookalike) account.
+  - Key at send time: a result is only as good as the key. Use the key published when the
+    message was sent (archived DNS, the provider, passive DNS) and import it with `keys import`.
+    Keys are rotated: today's key may not verify an old genuine message (DKIM_SIGNATURE_INVALID),
+    and a key fetched today with --online is weaker evidence (DKIM_KEY_FROM_CURRENT_DNS).
+  - DKIM_BODY_HASH_MISMATCH (high): the body differs from what was signed, whatever the key.
+    DKIM_SIGNATURE_INVALID (medium) can come from edited signed headers or from a key that is not
+    the one that signed; the tool cannot tell which.
+  - Outlook .msg files keep the original transport headers only when Outlook stored them
+    (PR_TRANSPORT_MESSAGE_HEADERS); without them (MSG_TRANSPORT_HEADERS_MISSING) there is
+    nothing to verify. Outlook rebuilds the body, so DKIM over a .msg is reported as not
+    evaluated, never as failed.
+  - Received hops are written by each server: only the hops added by servers you trust (usually
+    the recipient's own) are reliable. Times are compared with the --clock-skew tolerance.
+  - BEC heuristics (lookalike domains, display-name imitation, Reply-To or Return-Path elsewhere,
+    payment-details wording) are signals for review, never proof of fraud.
+  - Each message is parsed in a worker process (without network on Linux) limited by
+    --worker-timeout and --worker-memory-mb; a crash or limit is PARSER_FAILED for that item only.
   - Each audit entry stores the SHA-256 of the previous one; editing, deleting or re-ordering any
-    line is detected by `verify-log`. Removing the last lines is detected only against a record
-    kept outside the log: the RFC 3161 timestamp or, with --case-dir, the case log. Keep the log
-    folder with the reports.
-  - A file without findings is not proven authentic; read the Limitations section of each report.
-  - MD5 and SHA-1 are accepted for compatibility with older case files; pair them with SHA-256 or BLAKE3.
-  - The chain head is timestamped by an RFC 3161 authority (proves when the log existed). Offline? The run
-    finishes with `timestamp_pending`; run `rv-mailauth timestamp <LOG>` later.
-  - With --sign-cert every PDF is signed with the examiner's certificate; the password is never logged.
-  - Case folder: every tool re-verifies case-log.jsonl and the registry digest before
-    writing, and refuses a broken case (exit 3). Appends happen under case-log.lock; a lock
-    older than 10 minutes is reported as stale and never deleted automatically.
+    line is detected by `verify-log`. The --dkim-keys file's SHA-256 and every --online lookup
+    are in the audit log. Keep the log folder with the reports.
+  - MD5 and SHA-1 are accepted for compatibility with older case files; pair them with SHA-256 or
+    BLAKE3.
+  - The chain head is timestamped by an RFC 3161 authority (proves when the log existed). Offline?
+    The run finishes with `timestamp_pending`; run `rv-mailauth timestamp <LOG>` later.
+  - With --sign-cert every PDF is signed with the examiner's certificate; the password is never
+    logged.
+  - Case folder: every item is compared with the registry (by --evidence id, else by path, else
+    by content) before it is analysed; a different hash is the high finding
+    EVIDENCE_HASH_MISMATCH_WITH_CASE (the analysis still runs), a file not in the registry is
+    EVIDENCE_NOT_IN_CASE_REGISTRY (medium). The case log and registry digest are re-verified
+    before every write; a broken case is refused (exit 3). Appends happen under case-log.lock.
   - Each run's audit.jsonl records case_linked (the case-log entry it started from); the case
     log records the run's final audit head, so the two chains vouch for each other.";
+
+const KEYS_AFTER_HELP: &str = "\
+DESCRIPTION:
+  DKIM public keys for offline verification (`analyze --dkim-keys FILE`). A key file has one key
+  per record: \"selector._domainkey.domain<TAB>v=DKIM1; k=rsa; p=...\" or a BIND zone-file TXT
+  record. `keys import` turns archived DNS records into such a file and audits the import;
+  `keys show` lists what a key file holds. Nothing is ever fetched from the network.
+
+EXAMPLES:
+  rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
+  rv-mailauth keys show case-keys.txt";
+
+const KEYS_IMPORT_AFTER_HELP: &str = "\
+DESCRIPTION:
+  Reads archived DNS TXT records (BIND zone-file lines, or \"selector._domainkey.domain<TAB>TXT
+  value\" lines), keeps the records under selector._domainkey.domain and validates each one as a
+  DKIM key record (v=DKIM1, k=rsa|ed25519, a usable p= key) with the parser `analyze` uses. Other
+  record types (A, MX, SOA, ...), other TXT names (SPF, DMARC) and revoked keys (empty p=) are
+  skipped and listed in the audit log. Identical duplicates are merged. The keys are written,
+  sorted by name, to a new normalised key file whose header names every source and its SHA-256.
+  Nothing is written if any DKIM record is malformed, has a name relative to $ORIGIN (write
+  selector._domainkey.domain in full), or two different keys share one name.
+
+FILES WRITTEN:
+  <KEY-FILE>                            The normalised key file (never overwritten).
+  <OUT>/logs/<RUN-ID>/audit.jsonl|.log  Hash-chained log of the import: keys_import_started
+                                        (each source's path, size and SHA-256), key_imported
+                                        (name, key type, bits, SHA-256 of the record),
+                                        record_ignored, output_written (key file SHA-256).
+  <OUT>/logs/<RUN-ID>/environment.json  Tool and dependency versions, OS, host, user, arguments.
+  <OUT>/logs/<RUN-ID>/timestamp-<SEQ>.tsr  RFC 3161 token for the chain head (+ .json).
+
+FORENSIC NOTES:
+  - Record where each archive comes from (zone backup, provider export, passive DNS) and when it
+    was valid: DKIM results are only as good as the key at send time.
+  - The key file's SHA-256 printed here appears in the audit log of every `analyze` run that uses
+    it. `rv-mailauth verify-log <LOG>` checks the import log later.
+
+EXAMPLES:
+  rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
+  rv-mailauth keys import example-org.txt mailer-example-com.zone --key-file keys.txt -o E:\\lab \\
+    --case CASE-014 --actor \"Ana Ruiz\"
+
+EXIT CODES:
+  0  The key file was written and the import logged.
+  1  A source cannot be read, the key file already exists or cannot be written, or the audit log
+     cannot be created.
+  2  Usage error, or a DKIM record is malformed, two different keys share one name, or no DKIM
+     key record was found (nothing is written).";
+
+const KEYS_SHOW_AFTER_HELP: &str = "\
+DESCRIPTION:
+  Lists every usable key of a key file (line, selector, domain, key type, bits) with the file's
+  SHA-256, then every record `analyze` could not use. Nothing is written.
+
+EXAMPLES:
+  rv-mailauth keys show case-keys.txt
+  rv-mailauth keys show examples/sample/dkim-keys.txt
+
+EXIT CODES:
+  0  Every record of the file is a usable DKIM key.
+  1  The file cannot be read.
+  2  At least one record is not a usable DKIM key (listed).";
 
 #[derive(Parser)]
 #[command(name = TOOL_NAME, version = TOOL_VERSION, about = ABOUT, long_about = LONG_ABOUT, max_term_width = 100,
@@ -109,9 +230,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Hash, check and report on a file, a folder or a list of files.
-    #[command(long_about = LONG_ABOUT, after_long_help = SCAN_AFTER_HELP)]
-    Scan(Box<ScanArgs>),
+    /// Look for signals of alteration and BEC in emails: a file, a folder or a list of files.
+    // `scan` is accepted as a hidden alias for one release so existing scripts keep working.
+    #[command(long_about = LONG_ABOUT, after_long_help = ANALYZE_AFTER_HELP, alias = "scan")]
+    Analyze(Box<AnalyzeArgs>),
+    /// DKIM key files: import archived DNS TXT records, show what a key file holds.
+    #[command(subcommand, after_long_help = KEYS_AFTER_HELP)]
+    Keys(KeysCmd),
     /// Verify an audit log (audit.jsonl): edited, deleted or re-ordered entries, and truncation.
     #[command(after_long_help = "\
 CHECKS:
@@ -247,8 +372,8 @@ DESCRIPTION:
   Prints what this tool is, what it accepts and how to launch it, validated by
   schemas/describe.schema.json. RV Hub reads it to list the tool, start its GUI on a case
   folder (rv-mailauth-gui.exe --case-dir <CASE> [FILES...]) and suggest the tool for a file.
-  Fields: schema, tool, title, version, role (intake), main_verb (scan), accepts
-  (extensions and signatures; \"*\" = any file), case_formats, log_formats, cli_exe,
+  Fields: schema, tool, title, version, role (analysis), main_verb (analyze), accepts
+  (extensions eml, mbox, msg; signatures of .msg and mbox), case_formats, log_formats, cli_exe,
   gui_exe, exit_codes. Nothing is read or written; no audit log is created.
 
 EXAMPLES:
@@ -256,6 +381,111 @@ EXAMPLES:
 
 EXIT CODES:
   0  The description was printed.";
+
+#[derive(Subcommand)]
+enum KeysCmd {
+    /// Turn archived DNS TXT records into a normalised DKIM key file; the import is audited.
+    #[command(after_long_help = KEYS_IMPORT_AFTER_HELP)]
+    Import {
+        /// Archived DNS records: BIND zone files or "selector._domainkey.domain<TAB>TXT" lists.
+        /// Read-only; their SHA-256 goes into the audit log and the key file header.
+        /// Default: none (at least one is required)
+        /// Example: dns-archive-2026-03.zone
+        #[arg(value_name = "FILE", required = true, verbatim_doc_comment)]
+        sources: Vec<PathBuf>,
+        /// The normalised key file to write (refused if it already exists).
+        /// Default: none (required)
+        /// Example: --key-file case-keys.txt
+        #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+        key_file: PathBuf,
+        /// Folder where logs/<RUN-ID>/ of the import is created. Created if missing.
+        /// Default: ./rakvor-out
+        /// Example: --out E:\case-014\rv-mailauth
+        #[arg(
+            short,
+            long,
+            value_name = "DIR",
+            default_value = "rakvor-out",
+            verbatim_doc_comment,
+            hide_default_value = true
+        )]
+        out: PathBuf,
+        /// Name of the examiner, written in every audit entry.
+        /// Default: the operating-system user name
+        /// Example: --actor "Ana Ruiz"
+        #[arg(short, long, value_name = "NAME", verbatim_doc_comment)]
+        actor: Option<String>,
+        /// Case or engagement identifier recorded in the audit log.
+        /// Default: none
+        /// Example: --case CASE-2026-014
+        #[arg(short, long = "case", value_name = "ID", verbatim_doc_comment)]
+        case_id: Option<String>,
+        /// RFC 3161 time-stamping authority for the audit chain head.
+        /// Default: http://timestamp.digicert.com
+        /// Example: --tsa-url https://freetsa.org/tsr
+        #[arg(long, value_name = "URL", default_value = DEFAULT_TSA, verbatim_doc_comment, hide_default_value = true)]
+        tsa_url: String,
+        /// Do not request a trusted timestamp (offline labs). Also set by RV_NO_TIMESTAMP=1.
+        /// Default: off (a timestamp is requested)
+        /// Example: --no-timestamp
+        #[arg(long, env = "RV_NO_TIMESTAMP", value_parser = clap::builder::FalseyValueParser::new(), verbatim_doc_comment, hide_env = true)]
+        no_timestamp: bool,
+    },
+    /// List the keys of a key file: selector, domain, key type and bits.
+    #[command(after_long_help = KEYS_SHOW_AFTER_HELP)]
+    Show {
+        /// Key file (as written by `keys import`, or by hand in the same format).
+        /// Default: none (required)
+        /// Example: case-keys.txt
+        #[arg(value_name = "FILE", verbatim_doc_comment)]
+        file: PathBuf,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum MboxVariant {
+    /// Strip one '>' from every ">...From " body line (most current software).
+    Mboxrd,
+    /// Strip it only from ">From " lines (older software).
+    Mboxo,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum IsolationMode {
+    /// A worker process per message (time and memory limits; no network on Linux).
+    Worker,
+    /// In the main process (debugging only; a hang stops the run).
+    InProcess,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ItemReports {
+    All,
+    Flagged,
+}
+
+/// `--own-domain`: a domain name, lower case, without a leading "@" or trailing dot.
+fn parse_domain(v: &str) -> Result<String, String> {
+    let d = v
+        .trim()
+        .trim_start_matches('@')
+        .trim_end_matches('.')
+        .to_lowercase();
+    let ok = d.contains('.')
+        && d.len() <= 253
+        && d.split('.').all(|l| {
+            !l.is_empty()
+                && l.len() <= 63
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+                && l.chars().all(|c| c.is_alphanumeric() || c == '-')
+        });
+    if ok {
+        Ok(d)
+    } else {
+        Err(format!("'{v}' is not a domain name (e.g. acme.example)"))
+    }
+}
 
 #[derive(Clone, Copy, ValueEnum)]
 enum ProgressMode {
@@ -268,7 +498,7 @@ enum ProgressMode {
 }
 
 #[derive(Args)]
-struct ScanArgs {
+struct AnalyzeArgs {
     /// File or folder to review. Repeat for several.
     ///
     /// Folders are reviewed one level deep unless --recursive is given. Symbolic links are not followed.
@@ -422,6 +652,117 @@ struct ScanArgs {
         verbatim_doc_comment
     )]
     evidence: Vec<String>,
+
+    /// DKIM public keys to verify signatures with, OFFLINE: one record per key,
+    /// "selector._domainkey.domain<TAB>v=DKIM1; k=rsa; p=..." or a BIND zone-file TXT record
+    /// (see `keys import`). Use the keys published when the messages were sent. The file's
+    /// SHA-256 and the keys it holds go into the audit log.
+    /// Default: none (every signature is DKIM_KEY_NOT_AVAILABLE)
+    /// Example: --dkim-keys E:\CASE-014\keys.txt
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    dkim_keys: Option<PathBuf>,
+
+    /// Fetch the keys missing from --dkim-keys from TODAY's DNS (the system resolver). This is
+    /// weaker evidence: the key published today may not be the one that signed the message
+    /// (rotated, revoked, or re-published by whoever controls the domain now). Every lookup is
+    /// an audit entry, and each result based on it carries DKIM_KEY_FROM_CURRENT_DNS (medium).
+    /// Lookups run in the main process; worker processes never use the network.
+    /// Default: off (no network access for DKIM)
+    /// Example: --online
+    #[arg(long, verbatim_doc_comment)]
+    online: bool,
+
+    /// Your organisation's own domain, for the lookalike-domain and display-name checks.
+    /// Repeat (or separate with commas) for several.
+    /// Default: none (the lookalike and display-name checks have nothing to compare with)
+    /// Example: --own-domain acme.example --own-domain acme-group.example
+    #[arg(long, value_name = "DOMAIN", value_delimiter = ',', value_parser = parse_domain, verbatim_doc_comment)]
+    own_domain: Vec<String>,
+
+    /// Copy every attachment, decoded, to <ITEM>/attachments/ (hashed and audited like every
+    /// output). Attachments are always listed with their SHA-256, even without this option.
+    /// Default: off
+    /// Example: --extract-attachments
+    #[arg(long, verbatim_doc_comment)]
+    extract_attachments: bool,
+
+    /// Clock difference tolerated between servers, in seconds (0 to 86400), before the order of
+    /// the Received hops or a Date after the first hop is a finding.
+    /// Default: 300
+    /// Example: --clock-skew 900
+    #[arg(long, value_name = "SECONDS", default_value_t = 300, value_parser = clap::value_parser!(u64).range(0..=86400), verbatim_doc_comment, hide_default_value = true)]
+    clock_skew: u64,
+
+    /// mbox flavour for un-escaping ">From " body lines: mboxrd or mboxo. The wrong flavour can
+    /// change the body bytes, and so the DKIM body hash, of a message that quotes "From " lines.
+    /// Default: mboxrd
+    /// Example: --mbox-variant mboxo
+    #[arg(
+        long,
+        value_enum,
+        value_name = "VARIANT",
+        default_value = "mboxrd",
+        verbatim_doc_comment,
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
+    mbox_variant: MboxVariant,
+
+    /// Largest message parsed, in MiB (1 to 4096); a larger one is PARSER_FAILED (too_large).
+    /// Default: 200
+    /// Example: --max-message-mb 1024
+    #[arg(long, value_name = "MB", default_value_t = 200, value_parser = clap::value_parser!(u64).range(1..=4096), verbatim_doc_comment, hide_default_value = true)]
+    max_message_mb: u64,
+
+    /// Messages analysed per mbox (1 to 10000000); the rest is listed as not analysed.
+    /// Default: 50000
+    /// Example: --max-mbox-messages 200000
+    #[arg(long, value_name = "N", default_value_t = 50_000, value_parser = clap::value_parser!(u64).range(1..=10_000_000), verbatim_doc_comment, hide_default_value = true)]
+    max_mbox_messages: u64,
+
+    /// Seconds a worker process may spend on one message (1 to 86400) before it is stopped
+    /// (PARSER_FAILED, timeout).
+    /// Default: 120
+    /// Example: --worker-timeout 600
+    #[arg(long, value_name = "SECONDS", default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=86400), verbatim_doc_comment, hide_default_value = true)]
+    worker_timeout: u64,
+
+    /// Memory limit of one worker process in MiB (128 to 1048576): a job object on Windows, the
+    /// address space on Linux/macOS. Exceeding it is PARSER_FAILED (memory_limit).
+    /// Default: 1024
+    /// Example: --worker-memory-mb 4096
+    #[arg(long, value_name = "MB", default_value_t = 1024, value_parser = clap::value_parser!(u64).range(128..=1_048_576), verbatim_doc_comment, hide_default_value = true)]
+    worker_memory_mb: u64,
+
+    /// Where messages are parsed: worker (a separate process per message, with the limits
+    /// above) or in-process (no isolation; for debugging). The choice is in the audit log.
+    /// Default: worker
+    /// Example: --isolation in-process
+    #[arg(
+        long,
+        value_enum,
+        value_name = "MODE",
+        default_value = "worker",
+        verbatim_doc_comment,
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
+    isolation: IsolationMode,
+
+    /// Per-item report files for every item (all) or only for items with findings above info
+    /// (flagged). Skipped items are still listed in the statistics report; each skip is audited.
+    /// Default: all
+    /// Example: --item-reports flagged
+    #[arg(
+        long,
+        value_enum,
+        value_name = "WHICH",
+        default_value = "all",
+        verbatim_doc_comment,
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
+    item_reports: ItemReports,
 }
 
 fn main() -> ExitCode {
@@ -433,7 +774,25 @@ fn main() -> ExitCode {
     rv_mailauth_core::worker::register_frontend_executable();
     let cli = Cli::parse();
     ExitCode::from(match cli.command {
-        Command::Scan(a) => scan(*a),
+        Command::Analyze(a) => analyze(*a),
+        Command::Keys(KeysCmd::Show { file }) => keys::show(&file),
+        Command::Keys(KeysCmd::Import {
+            sources,
+            key_file,
+            out,
+            actor,
+            case_id,
+            tsa_url,
+            no_timestamp,
+        }) => keys::import(keys::ImportArgs {
+            sources,
+            output: key_file,
+            out_dir: out,
+            actor: actor.unwrap_or_else(rv_mailauth_core::env::os_user),
+            case_id,
+            tsa_url: (!no_timestamp).then_some(tsa_url),
+            command_line: std::env::args().collect(),
+        }),
         Command::VerifyLog { log, tsa_ca } => verify_log(log, tsa_ca),
         Command::VerifyCase { case, rehash } => verify_case(case, rehash),
         Command::SelfTest => self_test(),
@@ -458,13 +817,13 @@ fn main() -> ExitCode {
 
 fn usage_error(msg: &str) -> u8 {
     eprintln!(
-        "error: {}\n\nFor more information, try 'rv-mailauth scan --help'.",
+        "error: {}\n\nFor more information, try 'rv-mailauth analyze --help'.",
         msg
     );
     EXIT_USAGE
 }
 
-fn scan(a: ScanArgs) -> u8 {
+fn analyze(a: AnalyzeArgs) -> u8 {
     let mut algos = Vec::new();
     for h in &a.hashes {
         match HashAlgo::parse(h) {
@@ -488,6 +847,14 @@ fn scan(a: ScanArgs) -> u8 {
         Ok(ids) => ids,
         Err(e) => return usage_error(&e.message),
     };
+    if let Some(k) = &a.dkim_keys {
+        // A key file that cannot be read would silently turn every signature into "key not available".
+        let readable = std::fs::metadata(k).map(|m| m.is_file()).unwrap_or(false)
+            && std::fs::File::open(k).is_ok();
+        if !readable {
+            return usage_error(&format!("--dkim-keys {}: not a readable file", k.display()));
+        }
+    }
     if let Some(dir) = &a.case_dir {
         // Case problems found before the run map to their own exit codes (2 usage, 3 broken case).
         if let Err(e) = case::preflight(dir, a.case_id.as_deref(), &evidence_ids) {
@@ -533,9 +900,28 @@ fn scan(a: ScanArgs) -> u8 {
         case_dir: a.case_dir.clone(),
         evidence_ids,
         case_role: CASE_ROLE,
-        // Email-analysis options (--dkim-keys, --online, --own-domain, --extract-attachments, worker
-        // isolation): defaults until the CLI exposes them.
-        domain: Default::default(),
+        domain: DomainOptions {
+            dkim_keys: a.dkim_keys.clone(),
+            online_dns: a.online,
+            fetched_keys: Vec::new(),
+            own_domains: a.own_domain.clone(),
+            extract_attachments: a.extract_attachments,
+            clock_skew_s: a.clock_skew,
+            mbox_variant: match a.mbox_variant {
+                MboxVariant::Mboxrd => "mboxrd",
+                MboxVariant::Mboxo => "mboxo",
+            }
+            .into(),
+            max_message_bytes: a.max_message_mb * 1024 * 1024,
+            max_mbox_messages: a.max_mbox_messages,
+            worker_timeout_s: a.worker_timeout,
+            worker_memory_mb: a.worker_memory_mb,
+            item_reports_flagged_only: a.item_reports == ItemReports::Flagged,
+            isolation: match a.isolation {
+                IsolationMode::Worker => Isolation::Worker,
+                IsolationMode::InProcess => Isolation::InProcess,
+            },
+        },
     };
 
     let bar = match a.progress {
@@ -837,9 +1223,12 @@ fn describe() -> serde_json::Value {
         "title": "RV MailAuth",
         "version": TOOL_VERSION,
         "role": CASE_ROLE.name(),
-        "main_verb": "scan",
-        // The intake tool hashes and registers every file, whatever its type.
-        "accepts": {"extensions": ["*"], "signatures": ["*"]},
+        "main_verb": "analyze",
+        // .eml has no fixed signature (recognised by extension and header sniffing).
+        "accepts": {"extensions": ["eml", "mbox", "msg"], "signatures": [
+            {"format": "msg", "match": [{"offset": 0, "hex": "d0cf11e0a1b11ae1"}]},
+            {"format": "mbox", "match": [{"offset": 0, "hex": "46726f6d20"}]}
+        ]},
         "case_formats": [case::SCHEMA_CASE],
         "log_formats": ["rakvor.audit/1"],
         "cli_exe": format!("{}.exe", TOOL_NAME),
@@ -861,7 +1250,7 @@ fn docs_cli() -> String {
     let mut out = String::from(
         "# Command-line reference\n\n<!-- Generated by `rv-mailauth docs-cli`. Do not edit by hand: CI fails if this file differs. -->\n\n",
     );
-    out.push_str("```mermaid\nflowchart LR\n  A[rv-mailauth] --> B[scan]\n  A --> C[verify-log]\n  A --> D[self-test]\n  A --> T[timestamp]\n  A --> V[verify-case]\n  T --> E\n  B --> E[(logs/RUN-ID)]\n  B --> F[(reports/RUN-ID)]\n  B -. --case-dir .-> K[(CASE folder)]\n  V --> K\n  C --> E\n```\n\n");
+    out.push_str("```mermaid\nflowchart LR\n  A[rv-mailauth] --> B[analyze]\n  A --> KI[keys import]\n  A --> KS[keys show]\n  KI --> KF[(key file)]\n  KI --> E\n  KF -. --dkim-keys .-> B\n  A --> C[verify-log]\n  A --> D[self-test]\n  A --> T[timestamp]\n  A --> V[verify-case]\n  T --> E\n  B --> E[(logs/RUN-ID)]\n  B --> F[(reports/RUN-ID)]\n  B -. --case-dir .-> K[(CASE folder)]\n  V --> K\n  C --> E\n```\n\n");
     out.push_str(&format!(
         "## rv-mailauth\n\n```text\n{}\n```\n\n",
         root.render_long_help().to_string().trim_end()
@@ -873,13 +1262,23 @@ fn docs_cli() -> String {
         .map(|c| c.get_name().to_string())
         .collect();
     for name in names {
-        let sub = root.find_subcommand_mut(&name).expect("subcommand");
-        let mut sub = sub.clone().bin_name(format!("rv-mailauth {}", name));
+        let sub = root.find_subcommand_mut(&name).expect("subcommand").clone();
+        let mut cmd = sub.clone().bin_name(format!("rv-mailauth {}", name));
         out.push_str(&format!(
             "## rv-mailauth {}\n\n```text\n{}\n```\n\n",
             name,
-            sub.render_long_help().to_string().trim_end()
+            cmd.render_long_help().to_string().trim_end()
         ));
+        // Nested commands (`keys import`, `keys show`).
+        for nested in sub.get_subcommands().filter(|c| c.get_name() != "help") {
+            let full = format!("{} {}", name, nested.get_name());
+            let mut n = nested.clone().bin_name(format!("rv-mailauth {}", full));
+            out.push_str(&format!(
+                "## rv-mailauth {}\n\n```text\n{}\n```\n\n",
+                full,
+                n.render_long_help().to_string().trim_end()
+            ));
+        }
     }
     out
 }

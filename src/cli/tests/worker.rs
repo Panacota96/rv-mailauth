@@ -155,7 +155,7 @@ fn worker_processes_match_in_process_and_contain_faults() {
     let out = tempfile::tempdir().unwrap();
     let st = std::process::Command::new(&exe)
         .args([
-            "scan",
+            "analyze",
             "--hash",
             "sha256",
             "--progress",
