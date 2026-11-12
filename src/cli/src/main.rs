@@ -429,6 +429,8 @@ fn main() -> ExitCode {
     if std::env::args_os().nth(1).is_some_and(|a| a == "worker") {
         std::process::exit(rv_mailauth_core::worker::worker_main());
     }
+    // This executable serves as the worker of the default isolation.
+    rv_mailauth_core::worker::register_frontend_executable();
     let cli = Cli::parse();
     ExitCode::from(match cli.command {
         Command::Scan(a) => scan(*a),

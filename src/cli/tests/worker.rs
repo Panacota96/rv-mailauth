@@ -150,4 +150,35 @@ fn worker_processes_match_in_process_and_contain_faults() {
         std::env::remove_var("RV_WORKER_TEST_FAULT");
         std::env::remove_var("RV_WORKER_TEST_TIMEOUT_S");
     }
+
+    // 5. The CLI binary uses worker processes by default (no option given).
+    let out = tempfile::tempdir().unwrap();
+    let st = std::process::Command::new(&exe)
+        .args([
+            "scan",
+            "--hash",
+            "sha256",
+            "--progress",
+            "none",
+            "--no-timestamp",
+            "-i",
+        ])
+        .arg(evidence.join("01-clean-rsa.eml"))
+        .arg("-o")
+        .arg(out.path())
+        .status()
+        .unwrap();
+    assert!(st.code().is_some_and(|c| c <= 3), "{st:?}");
+    let logs = std::fs::read_dir(out.path().join("logs"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let audit = std::fs::read_to_string(logs.join("audit.jsonl")).unwrap();
+    assert!(
+        audit.contains("\"isolation\":\"worker_process\"")
+            && audit.contains("\"isolation_requested\":\"worker_process_of_frontend\""),
+        "default isolation not recorded as a worker process"
+    );
 }

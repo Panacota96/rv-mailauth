@@ -4,6 +4,11 @@
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    // `<exe> worker …`: one message analysed in an isolated child process (see core worker.rs).
+    if std::env::args_os().nth(1).is_some_and(|a| a == "worker") {
+        std::process::exit(rv_mailauth_core::worker::worker_main());
+    }
+    rv_mailauth_core::worker::register_frontend_executable();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             // Title-bar and taskbar icon (the .exe file icon comes from build.rs).

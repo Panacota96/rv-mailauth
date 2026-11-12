@@ -76,6 +76,28 @@ impl Failure {
     }
 }
 
+static FRONTEND_EXE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Called by a front-end (CLI, GUI) right after it handled `<exe> worker …`: this executable can serve as
+/// the worker of the default [`Isolation::Worker`].
+pub fn register_frontend_executable() {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = FRONTEND_EXE.set(exe);
+    }
+}
+
+/// The isolation actually applied: `Worker` becomes a worker process of the registered front-end, or
+/// `InProcess` when no front-end registered (unit tests, library use).
+pub fn resolve(requested: &Isolation) -> Isolation {
+    match requested {
+        Isolation::Worker => match FRONTEND_EXE.get() {
+            Some(exe) => Isolation::Subprocess { exe: exe.clone() },
+            None => Isolation::InProcess,
+        },
+        other => other.clone(),
+    }
+}
+
 /// Linux: move the worker into its own network namespace. Debug builds honour `RV_WORKER_TEST_NO_NETNS=1`
 /// (tests of the fallback only).
 fn network_namespace_wanted() -> bool {
@@ -880,6 +902,20 @@ mod tests {
         let mut bad = args.clone();
         bad.extend(["--message".into(), "{not json".into()]);
         assert_eq!(run_child(&bad, &mut &GO[..], &mut out, &mut err), 2);
+    }
+
+    #[test]
+    fn worker_processes_are_the_default_and_fall_back_without_a_frontend() {
+        assert_eq!(DomainOptions::default().isolation, Isolation::Worker);
+        // This test binary never registered as a front-end: it cannot serve as a worker.
+        assert_eq!(resolve(&Isolation::Worker), Isolation::InProcess);
+        let explicit = Isolation::Subprocess {
+            exe: PathBuf::from("/bin/rv"),
+        };
+        assert_eq!(resolve(&explicit), explicit);
+        assert_eq!(resolve(&Isolation::InProcess), Isolation::InProcess);
+        let json = serde_json::to_string(&Isolation::Worker).unwrap();
+        assert_eq!(json, "\"worker\"");
     }
 
     #[test]

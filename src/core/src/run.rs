@@ -806,6 +806,14 @@ fn pipeline(
     })
 }
 
+fn isolation_name(i: &crate::model::Isolation) -> &'static str {
+    match i {
+        crate::model::Isolation::InProcess => "in_process",
+        crate::model::Isolation::Subprocess { .. } => "worker_process",
+        crate::model::Isolation::Worker => "worker_process_of_frontend",
+    }
+}
+
 /// `analysis_configured`: the email-analysis options of the run, and the examiner's DKIM key file (path,
 /// SHA-256, keys usable, problems) — so the record shows which keys every DKIM result depends on.
 fn record_analysis_options(d: &DomainOptions, log: &mut AuditLog) -> std::io::Result<()> {
@@ -827,7 +835,9 @@ fn record_analysis_options(d: &DomainOptions, log: &mut AuditLog) -> std::io::Re
             "mbox_variant": d.mbox_variant, "max_message_bytes": d.max_message_bytes,
             "max_mbox_messages": d.max_mbox_messages, "worker_timeout_s": d.worker_timeout_s,
             "worker_memory_mb": d.worker_memory_mb,
-            "isolation": match &d.isolation { crate::model::Isolation::InProcess => "in_process", crate::model::Isolation::Subprocess { .. } => "worker_process" },
+            "isolation_requested": isolation_name(&d.isolation),
+            "isolation": isolation_name(&crate::worker::resolve(&d.isolation)),
+            "worker_exe": match crate::worker::resolve(&d.isolation) { crate::model::Isolation::Subprocess { exe } => Some(exe.display().to_string()), _ => None },
         }),
     )?;
     Ok(())
@@ -851,10 +861,7 @@ fn analyze_recorded(
     let path_s = result.path.display().to_string();
     let item_dir = report_dir.join("items").join(result.folder());
     std::fs::create_dir_all(&item_dir).map_err(io)?;
-    let isolation = match &cfg.domain.isolation {
-        crate::model::Isolation::InProcess => "in_process",
-        crate::model::Isolation::Subprocess { .. } => "worker_process",
-    };
+    let isolation = isolation_name(&crate::worker::resolve(&cfg.domain.isolation));
     log.record(
         "analysis_started",
         Some(&path_s),

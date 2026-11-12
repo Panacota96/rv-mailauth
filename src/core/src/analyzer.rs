@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! classify(name, first 4 KiB)
-//!   Eml  ──► message analysis (worker process with Isolation::Subprocess)
+//!   Eml  ──► message analysis (worker process, the default isolation)
 //!   Msg  ──► message analysis of the Outlook compound file (worker)
 //!   Mbox ──► container: split into MboxMessageRef (in process, a byte scan), mbox_index.json
 //!            each message: message analysis of its bytes (worker per message)
@@ -139,7 +139,7 @@ pub fn classify(file_name: &str, head: &[u8]) -> ItemKind {
 }
 
 /// FROZEN entry point called by run.rs for every readable item and for every message of an mbox.
-/// Emails go to the message analysis — in a worker process with [`Isolation::Subprocess`], so a crash,
+/// Emails go to the message analysis — in a worker process (the default [`Isolation::Worker`]), so a crash,
 /// hang or memory blow-up becomes a `PARSER_FAILED` finding instead of ending the run. An mbox container
 /// is split in process (a byte scan, no parsing). Everything else keeps the reference inventory logic.
 pub fn analyze_item(ctx: &AnalyzeCtx) -> Analysis {
@@ -154,6 +154,10 @@ pub fn analyze_item(ctx: &AnalyzeCtx) -> Analysis {
     match &ctx.opts.isolation {
         Isolation::InProcess => crate::mail::analyze_message(ctx, kind),
         Isolation::Subprocess { exe } => crate::worker::analyze_in_worker(exe, ctx),
+        Isolation::Worker => match crate::worker::resolve(&Isolation::Worker) {
+            Isolation::Subprocess { exe } => crate::worker::analyze_in_worker(&exe, ctx),
+            _ => crate::mail::analyze_message(ctx, kind),
+        },
     }
 }
 

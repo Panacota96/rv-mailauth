@@ -375,12 +375,20 @@ pub struct KeyRecord {
     pub line: u64,
 }
 
-/// How heavy analysis runs. Subprocess = `<exe> worker …` per message, so a crash, a hostile MIME tree or
-/// a hang cannot stop a bulk run or corrupt the audit log; InProcess is for unit tests and small runs.
+/// How heavy analysis runs. A worker process (`<exe> worker …`) per message is the DEFAULT, so a crash, a
+/// hostile MIME tree or a hang cannot stop a bulk run or corrupt the audit log.
+///
+/// - `Worker` (default): a worker process of the running front-end executable. The CLI and GUI register
+///   themselves at start-up (`worker::register_frontend_executable`); a program that did not register (a
+///   unit-test binary, a library user) cannot serve as a worker, so the run falls back to `InProcess` and
+///   records that fallback in `analysis_configured`.
+/// - `Subprocess { exe }`: a worker process of the given executable.
+/// - `InProcess`: no isolation (explicit opt-in, for tests; parser panics are still caught).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
     #[default]
+    Worker,
     InProcess,
     Subprocess {
         exe: PathBuf,
@@ -435,7 +443,7 @@ impl Default for DomainOptions {
             worker_timeout_s: 120,
             worker_memory_mb: 1024,
             item_reports_flagged_only: false,
-            isolation: Isolation::InProcess,
+            isolation: Isolation::Worker,
         }
     }
 }
