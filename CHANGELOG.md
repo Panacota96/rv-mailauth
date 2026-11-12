@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.2.0](https://github.com/Panacota96/rv-mailauth/compare/v0.1.0...v0.2.0) (2026-11-12)
+
+
+### Features
+
+* RV MailAuth v0.1 — email authenticity signals (core, CLI, GUI, docs) ([#3](https://github.com/Panacota96/rv-mailauth/issues/3)) ([639abbb](https://github.com/Panacota96/rv-mailauth/commit/639abbb01a54dc13163af3468c1fca74cb49f534))
+
 ## [Unreleased]
 
 ### Added
