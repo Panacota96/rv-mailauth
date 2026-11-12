@@ -106,10 +106,32 @@ fn samples_give_exactly_the_expected_findings_and_dkimpy_agrees() {
         ));
     }
     assert!(diffs.is_empty(), "\n{}", diffs.join("\n"));
-    assert!(
-        s.high > 0,
-        "the tampered samples have high findings (exit 3)"
+    assert_eq!(
+        exp["exit_code"],
+        if s.high > 0 { 3 } else { 0 },
+        "high findings give exit 3"
     );
+    // Item status (ok / attention / problem) per file and message, as derived independently by the generator.
+    let want_status: BTreeMap<String, String> =
+        serde_json::from_value(exp["status"].clone()).unwrap();
+    for e in std::fs::read_dir(s.report_dir.join("items")).unwrap() {
+        let t: Value = serde_json::from_str(
+            &std::fs::read_to_string(e.unwrap().path().join("technical.json")).unwrap(),
+        )
+        .unwrap();
+        let name = t["item"]["file_name"].as_str().unwrap();
+        let key = name
+            .rsplit_once('@')
+            .map(|(k, _)| k)
+            .filter(|k| k.contains('#'));
+        let key = key.unwrap_or(name);
+        assert_eq!(t["item"]["status"], want_status[key].as_str(), "{key}");
+        for f in t["findings"].as_array().unwrap() {
+            if f["code"] == "DKIM_SIGNATURE_INVALID" {
+                assert_eq!(f["severity"], "medium", "{key}");
+            }
+        }
+    }
 
     // Every per-message output is in the audit chain with its digest; the mbox expanded into three items.
     let audit = std::fs::read_to_string(s.log_dir.join("audit.jsonl")).unwrap();

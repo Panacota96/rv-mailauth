@@ -83,5 +83,26 @@
     "16-truncated.msg": [
       "FILE_STRUCTURE_DAMAGED"
     ]
+  },
+  "status": {
+    "01-clean-rsa.eml": "ok",
+    "02-clean-ed25519.eml": "ok",
+    "03-body-edited.eml": "problem",
+    "04-header-edited.eml": "attention",
+    "05-rotated-key.eml": "attention",
+    "06-lookalike-domain.eml": "attention",
+    "07-reply-to-trap.eml": "attention",
+    "08-display-name-spoof.eml": "attention",
+    "09-payment-details.eml": "ok",
+    "10-transport-headers.msg": "attention",
+    "11-no-transport-headers.msg": "attention",
+    "12-mailbox.mbox": "ok",
+    "12-mailbox.mbox#1": "ok",
+    "12-mailbox.mbox#2": "problem",
+    "12-mailbox.mbox#3": "attention",
+    "13-truncated.eml": "attention",
+    "14-not-aligned-attachment-date.eml": "attention",
+    "15-forwarded-unknown-key.eml": "attention",
+    "16-truncated.msg": "attention"
   }
 }

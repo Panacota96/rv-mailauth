@@ -68,7 +68,8 @@ impl Finding {
 /// Every finding code this tool emits, with its severity (the i18n catalogues word each one).
 pub const FINDING_CODES: &[(&str, Severity)] = &[
     ("DKIM_BODY_HASH_MISMATCH", Severity::High),
-    ("DKIM_SIGNATURE_INVALID", Severity::High),
+    // Medium, not high: with a matching body hash the failure can also come from a rotated or wrong key.
+    ("DKIM_SIGNATURE_INVALID", Severity::Medium),
     ("DKIM_KEY_FROM_CURRENT_DNS", Severity::Medium),
     ("DKIM_DOMAIN_NOT_ALIGNED", Severity::Medium),
     ("ARC_CHAIN_INVALID", Severity::Medium),

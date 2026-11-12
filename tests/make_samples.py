@@ -61,6 +61,23 @@ class EdKey:
                          signature_algorithm=b"ed25519-sha256")
 
 
+# Severity of each code (independent copy of the tool's table) → expected item status and run exit code.
+HIGH = {"DKIM_BODY_HASH_MISMATCH"}
+INFO = {"DKIM_KEY_NOT_AVAILABLE", "PAYMENT_DETAILS_MENTIONED", "DKIM_SIGNATURE_VALID", "AUTH_RESULTS_RECORDED"}
+
+
+def status_of(codes):
+    if any(c in HIGH for c in codes):
+        return "problem"
+    return "attention" if any(c not in INFO for c in codes) else "ok"
+
+
+def with_status(out: dict) -> dict:
+    out["status"] = {k: status_of(v) for k, v in out["files"].items()}
+    out["exit_code"] = 3 if "problem" in out["status"].values() else 0
+    return out
+
+
 def build(headers, body: str) -> bytes:
     text = CRLF.join(headers) + CRLF + CRLF + body.replace("\r\n", "\n").replace("\n", CRLF)
     if not text.endswith(CRLF):
@@ -302,9 +319,9 @@ def main():
                        "root). Written by tests/make_samples.py from the construction of each sample, not from a run.",
         "options": {"dkim_keys": "examples/sample/dkim-keys.txt", "own_domains": OWN},
         "args": ["--dkim-keys", "examples/sample/dkim-keys.txt", "--own-domain", OWN[0]],
-        "exit_code": 3,
         "files": dict(sorted(expected.items())),
     }
+    out = with_status(out)
     (SAMPLE / "expected_findings.json").write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n",
                                                    encoding="utf-8", newline="\n")
     algos = ["md5", "sha1", "sha256", "sha512", "sha3-256", "blake3"]
@@ -327,4 +344,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--refresh-status"]:
+        # Re-derive status and exit_code of the committed expected_findings.json without new keys or samples.
+        p = SAMPLE / "expected_findings.json"
+        out = with_status(json.loads(p.read_text(encoding="utf-8")))
+        p.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    else:
+        main()

@@ -180,8 +180,8 @@
     },
     "DKIM_SIGNATURE_INVALID": {
       "title": "La signature DKIM ne se vérifie pas",
-      "shows": "Le corps correspond à la signature DKIM de %{d} (sélecteur %{s}), mais la signature des en-têtes signés ne se vérifie pas avec la clé publique fournie (origine de la clé : %{key_source} ; vérificateur : %{reason}).",
-      "does_not_prove": "Cela n'indique pas qu'un en-tête a été falsifié : une clé fournie qui n'est pas celle utilisée à l'envoi (les clés changent) ou un en-tête réécrit en transit donnent le même résultat."
+      "shows": "Le corps correspond toujours à la signature DKIM de %{d} (sélecteur %{s}), mais la signature des en-têtes signés ne se vérifie pas avec la clé publique fournie (origine de la clé : %{key_source} ; vérificateur : %{reason}). Soit des en-têtes signés ont changé après la signature, soit la clé fournie n'est pas celle qui a signé (par exemple une clé renouvelée).",
+      "does_not_prove": "Cela n'indique pas laquelle des deux situations s'est produite, ni qui a modifié un en-tête ni pourquoi ; avec une clé renouvelée ou erronée, un message authentique donne le même résultat."
     },
     "DKIM_KEY_FROM_CURRENT_DNS": {
       "title": "Clé DKIM issue du DNS actuel",

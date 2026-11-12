@@ -180,8 +180,8 @@
     },
     "DKIM_SIGNATURE_INVALID": {
       "title": "La firma DKIM no se verifica",
-      "shows": "El cuerpo coincide con la firma DKIM de %{d} (selector %{s}), pero la firma de los campos de cabecera firmados no se verifica con la clave pública suministrada (origen de la clave: %{key_source}; verificador: %{reason}).",
-      "does_not_prove": "No indica que se falsificara una cabecera: una clave suministrada que no es la usada en el momento del envío (las claves rotan) o una cabecera reescrita en tránsito dan el mismo resultado."
+      "shows": "El cuerpo sigue coincidiendo con la firma DKIM de %{d} (selector %{s}), pero la firma de los campos de cabecera firmados no se verifica con la clave pública suministrada (origen de la clave: %{key_source}; verificador: %{reason}). O bien cambiaron campos de cabecera firmados después de la firma, o bien la clave suministrada no es la que firmó (por ejemplo, una clave rotada).",
+      "does_not_prove": "No indica cuál de las dos cosas ocurrió, ni quién cambió una cabecera ni por qué; con una clave rotada o equivocada un mensaje auténtico da el mismo resultado."
     },
     "DKIM_KEY_FROM_CURRENT_DNS": {
       "title": "Clave DKIM tomada del DNS actual",

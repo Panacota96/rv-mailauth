@@ -180,8 +180,8 @@
     },
     "DKIM_SIGNATURE_INVALID": {
       "title": "DKIM signature does not verify",
-      "shows": "The body matches the DKIM signature of %{d} (selector %{s}), but the signature over the signed header fields does not verify with the supplied public key (key source: %{key_source}; verifier: %{reason}).",
-      "does_not_prove": "It does not show that a header was forged: a supplied key that is not the one used at sending time (keys are rotated), or a header rewritten in transit, gives the same result."
+      "shows": "The body still matches the DKIM signature of %{d} (selector %{s}), but the signature over the signed header fields does not verify with the supplied public key (key source: %{key_source}; verifier: %{reason}). Either signed header fields changed after signing, or the supplied key is not the one that signed (for example a rotated key).",
+      "does_not_prove": "It does not tell which of the two happened, nor who changed a header or why; with a rotated or wrong key a genuine message gives the same result."
     },
     "DKIM_KEY_FROM_CURRENT_DNS": {
       "title": "DKIM key taken from today's DNS",
