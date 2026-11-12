@@ -358,12 +358,15 @@ fn pipeline(
         log.record(action, None, details.clone()).map_err(io)?;
     }
 
-    let env_json = report::pretty(&crate::env::describe(
+    let mut env = crate::env::describe(
         &cfg.tool_name,
         &cfg.tool_version,
         &cfg.frontend,
         &cfg.command_line,
-    ));
+    );
+    // Bundled data the results depend on (version and digest).
+    env["data_files"] = json!({"public_suffix_list": crate::psl::describe()});
+    let env_json = report::pretty(&env);
     let (_, env_digest) =
         report::write_hashed(&log_dir, "environment.json", &env_json, &cfg.algorithms)?;
     log.record("environment_recorded", Some("environment.json"), env_digest)
@@ -830,6 +833,7 @@ fn record_analysis_options(d: &DomainOptions, log: &mut AuditLog) -> std::io::Re
         None,
         json!({
             "dkim_mode": if d.online_dns { "online" } else { "offline" },
+            "public_suffix_list": crate::psl::describe(),
             "dkim_key_file": key_file, "own_domains": d.own_domains,
             "extract_attachments": d.extract_attachments, "clock_skew_s": d.clock_skew_s,
             "mbox_variant": d.mbox_variant, "max_message_bytes": d.max_message_bytes,

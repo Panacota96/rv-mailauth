@@ -8,3 +8,4 @@
 examples/sample/evidence/** binary
 tests/golden/*.zip binary
 tests/fixtures/inventory/** binary
+src/core/data/*.dat binary

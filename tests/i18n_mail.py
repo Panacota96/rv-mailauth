@@ -250,9 +250,9 @@ L = {
         "Los archivos .msg de Outlook no conservan el mensaje original: el cuerpo se recodifica (por lo que DKIM no puede comprobarse) y la sección de cabeceras original solo se conserva si se guardaron las cabeceras de transporte.",
         "Les fichiers .msg d'Outlook ne conservent pas le message d'origine : le corps est réencodé (DKIM ne peut donc pas être vérifié) et la section d'en-têtes d'origine n'est conservée que si les en-têtes de transport ont été enregistrés."),
     "BEC_HEURISTICS_FALSE_POSITIVES": (
-        "Lookalike-domain, Reply-To, display-name and payment-wording checks are heuristics with false positives and false negatives; the organisational domain is estimated without the full Public Suffix List.",
-        "Las comprobaciones de dominios parecidos, Reply-To, nombre visible y términos de pago son heurísticas con falsos positivos y falsos negativos; el dominio organizativo se estima sin la Public Suffix List completa.",
-        "Les contrôles de domaines ressemblants, Reply-To, nom affiché et termes de paiement sont des heuristiques avec faux positifs et faux négatifs ; le domaine organisationnel est estimé sans la Public Suffix List complète."),
+        "Lookalike-domain, Reply-To, display-name and payment-wording checks are heuristics with false positives and false negatives; the organisational domain comes from the bundled Public Suffix List, whose version is recorded in environment.json and may differ from the list in force when the message was sent.",
+        "Las comprobaciones de dominios parecidos, Reply-To, nombre visible y términos de pago son heurísticas con falsos positivos y falsos negativos; el dominio organizativo se obtiene de la Public Suffix List incluida, cuya versión consta en environment.json y puede ser anterior o posterior al mensaje.",
+        "Les contrôles de domaines ressemblants, Reply-To, nom affiché et termes de paiement sont des heuristiques avec faux positifs et faux négatifs ; le domaine organisationnel est déterminé avec la Public Suffix List fournie, dont la version figure dans environment.json et peut différer de celle en vigueur à la date du message."),
     "HEADERS_ARE_CLAIMS": (
         "Received, Date and Authentication-Results headers are text that servers and clients wrote; unsigned headers can be added or edited by anyone who handled the file.",
         "Las cabeceras Received, Date y Authentication-Results son texto escrito por servidores y clientes; las cabeceras no firmadas pueden añadirlas o editarlas quienes manejaron el archivo.",

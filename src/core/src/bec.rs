@@ -379,6 +379,34 @@ mod tests {
         assert_eq!(lookalike("example.net", own), None);
     }
 
+    /// Lookalikes under multi-label public suffixes (.co.uk, .com.co, .gouv.fr) compare the registrable label.
+    #[test]
+    fn lookalikes_under_multi_label_suffixes() {
+        assert_eq!(
+            lookalike("examp1e.co.uk", "example.co.uk"),
+            Some("confusable")
+        );
+        assert_eq!(lookalike("mail.example.co.uk", "example.co.uk"), None);
+        assert_eq!(lookalike("other.co.uk", "example.co.uk"), None);
+        assert_eq!(
+            lookalike("empresas.com.co", "empresa.com.co"),
+            Some("edit_distance_1")
+        );
+        assert_eq!(
+            lookalike("empresa.co", "empresa.com.co"),
+            Some("same_name_other_suffix")
+        );
+        assert_eq!(lookalike("smtp.empresa.com.co", "empresa.com.co"), None);
+        assert_eq!(lookalike("impots.gouv.fr.example", "impots.gouv.fr"), None);
+        assert_eq!(
+            lookalike("imp0ts.gouv.fr", "impots.gouv.fr"),
+            Some("confusable")
+        );
+        assert_eq!(lookalike("notif.impots.gouv.fr", "impots.gouv.fr"), None);
+        // Under the old two-label heuristic every *.gouv.fr looked like one organisation; now they differ.
+        assert_eq!(lookalike("douane.gouv.fr", "impots.gouv.fr"), None);
+    }
+
     #[test]
     fn display_name_and_reply_to() {
         let own = vec!["acme.example".to_string()];

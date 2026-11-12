@@ -287,25 +287,10 @@ fn classify(r: &DkimResult) -> (&'static str, Option<String>) {
     }
 }
 
-/// Organisational domain (relaxed DMARC-style alignment): the registrable domain, with a short list of
-/// common two-label public suffixes. A heuristic, not the Public Suffix List (stated in the limitations).
+/// Organisational domain (relaxed DMARC-style alignment): the registrable domain under the bundled Public
+/// Suffix List (see `psl.rs`).
 pub fn org_domain(domain: &str) -> String {
-    const TWO_LABEL: &[&str] = &[
-        "co.uk", "org.uk", "gov.uk", "ac.uk", "com.co", "net.co", "org.co", "gov.co", "edu.co",
-        "com.br", "com.mx", "com.ar", "com.au", "co.jp", "co.nz", "gouv.fr", "asso.fr", "com.es",
-        "org.es", "co.za", "com.pe", "com.ec", "com.ve",
-    ];
-    let d = domain.trim().trim_end_matches('.').to_ascii_lowercase();
-    let labels: Vec<&str> = d.split('.').filter(|l| !l.is_empty()).collect();
-    if labels.len() <= 2 {
-        return labels.join(".");
-    }
-    let last2 = labels[labels.len() - 2..].join(".");
-    if TWO_LABEL.contains(&last2.as_str()) {
-        labels[labels.len() - 3..].join(".")
-    } else {
-        last2
-    }
+    crate::psl::org_domain(domain)
 }
 
 /// Verifies every DKIM signature and the ARC chain of `raw` with `keys` only.
@@ -502,11 +487,34 @@ mod tests {
     }
 
     #[test]
-    fn org_domain_heuristic() {
+    fn org_domain_uses_the_public_suffix_list() {
         assert_eq!(org_domain("mail.example.org"), "example.org");
         assert_eq!(org_domain("a.b.example.co.uk"), "example.co.uk");
-        assert_eq!(org_domain("example.com.co"), "example.com.co");
+        assert_eq!(org_domain("smtp.empresa.com.co"), "empresa.com.co");
+        assert_eq!(org_domain("mail.impots.gouv.fr"), "impots.gouv.fr");
         assert_eq!(org_domain("Example.ORG."), "example.org");
+    }
+
+    /// DKIM alignment under .com.co, .gouv.fr and .co.uk: same registrable domain aligns, a sibling under the
+    /// same public suffix does not.
+    #[test]
+    fn alignment_under_multi_label_suffixes() {
+        let sig = |d: &str| {
+            format!(
+                "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d={d}; s=s1; h=from; bh=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=; b=dGVzdA==\r\nFrom: a@x\r\n\r\n"
+            )
+        };
+        for (d, from, aligned) in [
+            ("mail.empresa.com.co", "empresa.com.co", true),
+            ("otra.com.co", "empresa.com.co", false),
+            ("notif.impots.gouv.fr", "impots.gouv.fr", true),
+            ("douane.gouv.fr", "impots.gouv.fr", false),
+            ("bounce.example.co.uk", "example.co.uk", true),
+            ("other.co.uk", "example.co.uk", false),
+        ] {
+            let r = verify(sig(d).as_bytes(), &[], from);
+            assert_eq!(r.signatures[0].aligned_with_from, aligned, "{d} vs {from}");
+        }
     }
 
     #[test]

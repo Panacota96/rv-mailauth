@@ -163,6 +163,16 @@ fn samples_give_exactly_the_expected_findings_and_dkimpy_agrees() {
     assert!(entries.iter().any(
         |e| e["action"] == "analysis_configured" && e["details"]["dkim_key_file"]["keys"] == 4
     ));
+    // The bundled Public Suffix List is identified (version + SHA-256) in environment.json and the audit log.
+    let env: Value =
+        serde_json::from_str(&std::fs::read_to_string(s.log_dir.join("environment.json")).unwrap())
+            .unwrap();
+    let psl = &env["data_files"]["public_suffix_list"];
+    let pinned = std::fs::read_to_string(root().join("src/core/data/PSL_VERSION.txt")).unwrap();
+    assert!(pinned.contains(psl["sha256"].as_str().unwrap()), "{psl}");
+    assert!(pinned.contains(psl["version"].as_str().unwrap()));
+    assert!(entries.iter().any(|e| e["action"] == "analysis_configured"
+        && e["details"]["public_suffix_list"]["sha256"] == psl["sha256"]));
     // Every mbox message cites its source (mbox digest + index + byte offset) in its technical report and
     // custody form (JSON, HTML and PDF text).
     let mbox_sha = csv_sha256(&s.log_dir, "12-mailbox.mbox");

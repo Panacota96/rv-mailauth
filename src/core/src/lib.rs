@@ -23,6 +23,7 @@ pub mod mail;
 pub mod mbox;
 pub mod model;
 pub mod msg;
+pub mod psl;
 pub mod report;
 pub mod run;
 pub mod time;

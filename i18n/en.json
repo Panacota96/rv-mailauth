@@ -292,7 +292,7 @@
     "DKIM_NEEDS_KEY_AT_SENDING_TIME": "DKIM results depend on the public keys supplied: a check is only meaningful with the key that was valid when the message was sent. Keys are rotated, so a current key can fail a genuine message and a missing key leaves the signature unchecked.",
     "MISSING_SIGNATURE_PROVES_NOTHING": "A missing DKIM signature is common and proves nothing; a valid signature covers only the signed header fields and the body, not who wrote the message.",
     "MSG_MAY_LACK_TRANSPORT_HEADERS": "Outlook .msg files do not keep the original message: the body is re-encoded (so DKIM cannot be checked) and the original header section is kept only when transport headers were stored.",
-    "BEC_HEURISTICS_FALSE_POSITIVES": "Lookalike-domain, Reply-To, display-name and payment-wording checks are heuristics with false positives and false negatives; the organisational domain is estimated without the full Public Suffix List.",
+    "BEC_HEURISTICS_FALSE_POSITIVES": "Lookalike-domain, Reply-To, display-name and payment-wording checks are heuristics with false positives and false negatives; the organisational domain comes from the bundled Public Suffix List, whose version is recorded in environment.json and may differ from the list in force when the message was sent.",
     "HEADERS_ARE_CLAIMS": "Received, Date and Authentication-Results headers are text that servers and clients wrote; unsigned headers can be added or edited by anyone who handled the file.",
     "MBOX_ESCAPING_AMBIGUOUS": "In an mbox, body lines starting with \"From \" are escaped with '>'; un-escaping follows the selected variant (mboxrd by default) and cannot always restore the original line, which can affect DKIM body hashes."
   },

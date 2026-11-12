@@ -745,6 +745,7 @@ mod tests {
             "dkim.rs",
             "bec.rs",
             "model.rs",
+            "psl.rs",
             "hash.rs",
         ]
         .iter()

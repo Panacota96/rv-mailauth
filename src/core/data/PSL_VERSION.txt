@@ -1,0 +1,13 @@
+Public Suffix List, bundled for the organisational-domain estimate (DKIM alignment, Message-ID and Reply-To
+domain comparison, lookalike-domain labels).
+
+file:       public_suffix_list.dat
+source:     https://publicsuffix.org/list/public_suffix_list.dat
+version:    2026-11-10_11-23-57_UTC
+commit:     3db7776283b0874634fea8b01168f785360d64f2
+downloaded: 2026-11-12
+sha256:     b726c0248a4b6bbb2ece1a9cf98644afaf90469f9508435e3901ebe85655ebee
+licence:    MPL-2.0 (Mozilla Public License 2.0), unmodified copy; see NOTICE
+
+To update: download the file from the source URL, replace it unmodified, update version, commit, downloaded
+and sha256 here (sha256sum public_suffix_list.dat), and run the tests (psl::tests checks the digest).
