@@ -44,6 +44,8 @@
     "page": "Page",
     "of": "sur",
     "generated_by": "Généré par",
+    "flagged_only_note": "Les rapports par élément n’ont été écrits que pour les éléments ayant des constats au-dessus du niveau informatif (--item-reports flagged). Les éléments sans lien n’ont pas de dossier de rapport : leur statut et leur nombre de constats sont indiqués ici.",
+    "item_report_not_written": "pas de rapport par élément : mode éléments signalés uniquement",
     "cancelled_note": "L'exécution a été annulée par l'utilisateur ; seuls les éléments traités avant l'annulation sont rapportés.",
     "none": "Aucun",
     "unknown": "inconnu",

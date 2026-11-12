@@ -44,6 +44,8 @@
     "page": "Página",
     "of": "de",
     "generated_by": "Generado por",
+    "flagged_only_note": "Solo se escribieron informes por elemento para los elementos con hallazgos por encima de informativo (--item-reports flagged). Los elementos sin enlace no tienen carpeta de informe: aquí se muestran su estado y su número de hallazgos.",
+    "item_report_not_written": "sin informe por elemento: modo solo marcados",
     "cancelled_note": "El usuario canceló la ejecución; solo se informan los elementos procesados antes de la cancelación.",
     "none": "Ninguno",
     "unknown": "desconocido",

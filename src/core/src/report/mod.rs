@@ -64,6 +64,16 @@ pub struct RunInfo {
     pub timestamp: Value,
     /// Set when the run works in a shared case folder (`--case-dir`).
     pub case: Option<CaseInfo>,
+    /// `--item-reports flagged`: items without findings above informational get no report folder.
+    pub item_reports_flagged_only: bool,
+}
+
+impl RunInfo {
+    /// Whether this item's report folder (`items/<folder>/`) is written: always, except for an item with
+    /// status ok under `--item-reports flagged`. Statistics reports link only to folders that exist.
+    pub fn item_reports_written(&self, it: &ItemResult) -> bool {
+        !(self.item_reports_flagged_only && it.status() == "ok")
+    }
 }
 
 /// Counts of how the run's items relate to the case registry.
@@ -361,12 +371,20 @@ pub fn statistics_context(
     let item_rows: Vec<Value> = items
         .iter()
         .map(|it| {
+            // No link to a folder that was not written (`--item-reports flagged`): status and counts only.
+            let link = run
+                .item_reports_written(it)
+                .then(|| format!("items/{}/technical.{}.html", it.folder(), lang));
             json!({"index": it.index, "file_name": it.file_name(), "size": it.size, "finding_count": it.findings.len(),
                    "evidence_id": it.evidence_id,
                    "status": it.status(), "status_label": c.label(&format!("status_{}", it.status())),
-                   "link": format!("items/{}/technical.{}.html", it.folder(), lang)})
+                   "link": link})
         })
         .collect();
+    m.insert(
+        "item_reports_flagged_only".into(),
+        json!(run.item_reports_flagged_only),
+    );
     m.insert("totals".into(), json!({"items": totals.items, "bytes": totals.bytes, "errors": totals.errors, "throughput_text": throughput(totals.bytes, run.elapsed_ms)}));
     m.insert("severity_rows".into(), json!(severity_rows));
     m.insert("code_rows".into(), json!(code_rows));
@@ -536,8 +554,19 @@ pub fn statistics_json(
         "findings_by_severity": sev, "findings_by_code": codes, "items_by_status": status, "items_by_type": types,
         "duplicate_groups": duplicate_groups(items).into_iter().map(|(h, idx)| json!({"hash": h, "items": idx.iter().map(|&i| items[i].index).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "case": run.case.as_ref().map(|c| c.to_json()),
-        "items": items.iter().map(|it| json!({"index": it.index, "evidence_id": it.evidence_id, "path": it.path.display().to_string(), "size": it.size, "status": it.status(),
-              "findings": it.findings.iter().map(|f| f.code.clone()).collect::<Vec<_>>(), "report_folder": format!("items/{}", it.folder())})).collect::<Vec<_>>(),
+        "item_reports": if run.item_reports_flagged_only { "flagged" } else { "all" },
+        "items": items.iter().map(|it| {
+            // Under `--item-reports flagged` the folder of an ok item holds only the per-message outputs
+            // (headers.json, dkim.json, ...), not the technical/summary/custody reports.
+            let written = run.item_reports_written(it);
+            let mut v = json!({"index": it.index, "evidence_id": it.evidence_id, "path": it.path.display().to_string(), "size": it.size, "status": it.status(),
+              "findings": it.findings.iter().map(|f| f.code.clone()).collect::<Vec<_>>(), "report_folder": format!("items/{}", it.folder()),
+              "item_reports_written": written});
+            if !written {
+                v["report_skipped"] = json!("item_reports_flagged_only");
+            }
+            v
+        }).collect::<Vec<_>>(),
         "limitations": LIMITATIONS,
         "audit": {"head": audit.head, "entries": audit.entries, "log_dir": audit.log_dir},
         "timestamp": if run.timestamp.is_object() { run.timestamp.clone() } else { json!({"status": "off"}) },
@@ -744,11 +773,19 @@ pub fn statistics_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         b.push(Block::Kv(rows));
     }
     b.push(Block::Heading(t("items")));
+    if ctx["item_reports_flagged_only"].as_bool() == Some(true) {
+        b.push(Block::Note(t("flagged_only_note")));
+    }
     b.push(Block::Kv(
         arr(ctx, "item_rows")
             .iter()
             .map(|r| {
                 let eid = s(r, "evidence_id");
+                let no_report = if r["link"].is_null() {
+                    format!(" \u{00B7} {}", t("item_report_not_written"))
+                } else {
+                    String::new()
+                };
                 (
                     if eid.is_empty() {
                         format!("#{}  {}", s(r, "index"), s(r, "file_name"))
@@ -756,12 +793,13 @@ pub fn statistics_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
                         format!("#{}  {}  {}", s(r, "index"), eid, s(r, "file_name"))
                     },
                     format!(
-                        "{} \u{00B7} {} {} \u{00B7} {} {}",
+                        "{} \u{00B7} {} {} \u{00B7} {} {}{}",
                         s(r, "status_label"),
                         s(r, "size"),
                         t("bytes").to_lowercase(),
                         s(r, "finding_count"),
-                        t("findings").to_lowercase()
+                        t("findings").to_lowercase(),
+                        no_report
                     ),
                 )
             })

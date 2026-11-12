@@ -232,7 +232,19 @@
             }
           },
           "report_folder": {
-            "type": "string"
+            "type": "string",
+            "description": "items/<folder>: the item's per-message outputs and, when item_reports_written is true, its reports."
+          },
+          "item_reports_written": {
+            "type": "boolean",
+            "description": "false when the technical, summary and custody reports were not written (--item-reports flagged and status ok)."
+          },
+          "report_skipped": {
+            "type": "string",
+            "enum": [
+              "item_reports_flagged_only"
+            ],
+            "description": "Present when item_reports_written is false: why no item report was written."
           },
           "evidence_id": {
             "type": [
@@ -244,6 +256,14 @@
           }
         }
       }
+    },
+    "item_reports": {
+      "type": "string",
+      "enum": [
+        "all",
+        "flagged"
+      ],
+      "description": "--item-reports: all items, or only items with findings above informational."
     },
     "limitations": {
       "type": "array",

@@ -703,6 +703,7 @@ fn pipeline(
         signer,
         timestamp: json!({"status": "off"}),
         case: link.as_deref().map(|l| l.info(cfg.case_role)),
+        item_reports_flagged_only: cfg.domain.item_reports_flagged_only,
     };
     let log_dir_s = log_dir.display().to_string();
     for r in &results {
@@ -714,7 +715,7 @@ fn pipeline(
         let dir = report_dir.join("items").join(r.folder());
         // `--item-reports flagged`: no report files for items without findings above info (still listed in
         // the statistics report; the skip is audited).
-        if cfg.domain.item_reports_flagged_only && r.status() == "ok" {
+        if !info.item_reports_written(r) {
             log.record(
                 "item_reports_skipped",
                 Some(&r.path.display().to_string()),

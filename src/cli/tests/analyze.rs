@@ -162,6 +162,8 @@ fn every_email_option_reaches_the_run_and_the_audit_log() {
             "in-process",
             "--item-reports",
             "flagged",
+            "--lang",
+            "all",
             "-o",
         ])
         .arg(out.path())
@@ -232,6 +234,57 @@ fn every_email_option_reaches_the_run_and_the_audit_log() {
         "item_reports_flagged_only"
     );
     assert!(attachment_item.join("technical.json").exists());
+    // The statistics reports do not link to the reports that were not written; they say why.
+    assert_eq!(stats["item_reports"], "flagged");
+    assert_eq!(clean["item_reports_written"], false);
+    assert_eq!(clean["report_skipped"], "item_reports_flagged_only");
+    let flagged = stats["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["status"] != "ok")
+        .unwrap();
+    assert_eq!(flagged["item_reports_written"], true);
+    assert!(flagged.get("report_skipped").is_none());
+    let catalogue = |lang: &str| -> Value {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../i18n/{lang}.json"));
+        serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+    };
+    for lang in ["en", "es", "fr"] {
+        let html = std::fs::read_to_string(reports.join(format!("statistics.{lang}.html")))
+            .unwrap()
+            .replace("&#x2f;", "/"); // minijinja escapes "/" in attributes
+        let labels = &catalogue(lang)["labels"];
+        let not_written = labels["item_report_not_written"].as_str().unwrap();
+        let escaped = not_written.replace('\'', "&#x27;");
+        assert!(
+            !html.contains("href=\"items/00001-01-clean-rsa.eml/"),
+            "{lang}: link to a report that was not written"
+        );
+        assert!(
+            html.contains(&format!("01-clean-rsa.eml <em>({escaped})</em>")),
+            "{lang}"
+        );
+        assert!(html.contains("--item-reports flagged"), "{lang}");
+        let link = format!(
+            "href=\"items/{}/technical.{lang}.html\"",
+            attachment_item.file_name().unwrap().to_string_lossy()
+        );
+        assert!(html.contains(&link), "{lang}: flagged item keeps its link");
+        let pdf = std::fs::read(reports.join(format!("statistics.{lang}.pdf"))).unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+        if lang == "en" {
+            let text = String::from_utf8_lossy(&pdf);
+            assert!(
+                text.contains("flagged-only mode"),
+                "PDF says why there is no report"
+            );
+            assert!(
+                text.contains("--item-reports flagged"),
+                "PDF explains the mode"
+            );
+        }
+    }
     // The DKIM key file did its work: the RSA message verifies.
     assert!(
         clean["findings"]
