@@ -421,7 +421,9 @@ pub enum Isolation {
 #[serde(default)]
 pub struct DomainOptions {
     /// `--dkim-keys FILE`: DKIM public keys supplied by the examiner ("selector._domainkey.domain<TAB>TXT"
-    /// lines, or BIND zone-file TXT records). None = no key: every signature is DKIM_KEY_NOT_AVAILABLE.
+    /// lines, or BIND zone-file TXT records). None = no key: every signature whose body hash matches is
+    /// DKIM_KEY_NOT_AVAILABLE (the body hash is checked before the key is needed, so DKIM_BODY_HASH_MISMATCH
+    /// is found without a key).
     pub dkim_keys: Option<PathBuf>,
     /// `--online`: keys missing from the key file are fetched from today's DNS (parent process only; every
     /// fetch is an audit entry and adds DKIM_KEY_FROM_CURRENT_DNS). Off by default.

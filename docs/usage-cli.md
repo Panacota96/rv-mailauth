@@ -214,7 +214,8 @@ Options:
           "selector._domainkey.domain<TAB>v=DKIM1; k=rsa; p=..." or a BIND zone-file TXT record
           (see `keys import`). Use the keys published when the messages were sent. The file's
           SHA-256 and the keys it holds go into the audit log.
-          Default: none (every signature is DKIM_KEY_NOT_AVAILABLE)
+          Default: none (signatures are DKIM_KEY_NOT_AVAILABLE; a body-hash mismatch is found
+          anyway)
           Example: --dkim-keys E:\CASE-014\keys.txt
 
       --online

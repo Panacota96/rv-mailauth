@@ -46,6 +46,7 @@ Source: "{#SourceDir}\NOTICE"; DestDir: "{app}"
 Source: "{#SourceDir}\CHANGELOG.md"; DestDir: "{app}"
 Source: "{#SourceDir}\docs\*"; DestDir: "{app}\docs"; Flags: recursesubdirs
 Source: "{#SourceDir}\examples\sample\evidence\*"; DestDir: "{app}\examples\sample\evidence"
+Source: "{#SourceDir}\examples\sample\dkim-keys.txt"; DestDir: "{app}\examples\sample"
 
 [Icons]
 Name: "{group}\RV MailAuth"; Filename: "{app}\rv-mailauth-gui.exe"
