@@ -1,255 +1,200 @@
-<!--
-  Template note for the docs agent of a tool scaffolded from rv-mailauth: sections 1, 2.3, 3 (shared rows), 6, 7,
-  8 and the shared troubleshooting tables apply to every Rakvor tool. Rewrite the parts between forge:domain
-  markers: the walkthrough steps that show what THIS tool does in the case (intake here; analysis in a new tool),
-  the domain outputs, the findings table and the domain messages.
--->
-
 # Usage guide: from intake to a verified case
 
-This is the end-to-end guide for an examiner. It walks through one case, explains every output, says how to read
-each finding, and how to prove afterwards that nothing changed. Option lists are not repeated here:
-
-- every command, option, default, example and exit code: [usage-cli.md](usage-cli.md) (generated from `--help`);
-- the desktop app, window by window: [usage-gui.md](usage-gui.md);
-- the case folder contract: [case-folder.md](case-folder.md);
-- why each check works: [theory.md](theory.md); legal weight: [admissibility.md](admissibility.md);
-- installing and verifying the tool: [installation.md](installation.md).
+This guide walks an examiner through one email case end to end: registering the evidence with **rv-hashinv**,
+preparing the DKIM keys, analysing with **rv-mailauth**, reviewing messages in the desktop app, and verifying the
+whole case before handing it over. Every option: [usage-cli.md](usage-cli.md) (generated from `--help`). The
+desktop app: [usage-gui.md](usage-gui.md). Why each step works: [theory.md](theory.md). What each report holds:
+[reports.md](reports.md).
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    actor X as Examiner
-    participant H as rv-mailauth (intake)
+    participant E as Examiner
+    participant H as rv-hashinv (intake)
+    participant K as rv-mailauth keys
+    participant M as rv-mailauth analyze
+    participant G as rv-mailauth-gui (viewer)
     participant C as Case folder
-    participant P as Analysis tool (e.g. rv-pdfauth)
-    participant T as TSA
-    X->>H: analyze --case-dir CASE --case ID -i E:\export
-    H->>C: case.json, registry E0001…, case-log run_started / evidence_registered
-    H->>T: audit chain head
-    T-->>H: RFC 3161 token
-    H->>C: runs/rv-mailauth/RUN-ID, case-log run_finished
-    X->>P: analyze --case-dir CASE
-    P->>C: re-hash every item, compare with the registry
-    P->>C: runs/rv-pdfauth/RUN-ID, case-log run_started / run_finished
-    X->>H: verify-case CASE
-    H-->>X: OK, case-log entries, registered items, runs verified
-    X->>X: OpenSSL token check, report re-hash, sign and file
+    E->>H: scan -i EXPORT --case-dir CASE --case ID
+    H->>C: case.json, registry (E0001…), runs/rv-hashinv/RUN
+    E->>K: keys import ARCHIVE --key-file case-keys.txt
+    K-->>E: key file + its own audit log (sources' SHA-256)
+    E->>M: analyze --case-dir CASE --dkim-keys case-keys.txt --own-domain …
+    M->>C: re-hash + verify every item against the registry, runs/rv-mailauth/RUN
+    E->>G: open the run, open a message
+    G->>C: review.jsonl (viewing, anchored to run_finished)
+    E->>M: verify-case CASE --rehash, verify-log RUN/logs
 ```
+
+## Contents
+
+- [1. Before you start](#1-before-you-start)
+- [2. Case walkthrough](#2-case-walkthrough)
+- [3. Reading the outputs](#3-reading-the-outputs)
+- [4. Interpreting each finding](#4-interpreting-each-finding)
+- [5. Working without a case folder](#5-working-without-a-case-folder)
+- [6. Timestamps](#6-timestamps)
+- [7. Signing reports with the examiner certificate](#7-signing-reports-with-the-examiner-certificate)
+- [8. Verifying a run](#8-verifying-a-run)
+- [9. Troubleshooting](#9-troubleshooting)
 
 ## 1. Before you start
 
-| Check | Why | How |
-| --- | --- | --- |
-| Work on a **verified copy** (forensic image, write-blocked export), never the original media | The tool is read-only in software, not a write blocker | Imaging tool + write blocker; note model and serial |
-| The installed tool is the genuine release | Court question: "how do you know what you ran?" | [installation.md](installation.md) steps 2–4 and 6 |
-| Hash policy | MD5/SHA-1 alone are not collision-resistant | Always include `sha256` (or `sha512`): `--hash sha256,md5` when an older record uses MD5 |
-| Clock | Audit times come from the workstation clock | Check Windows time sync before the run |
-| Jurisdiction | Selects the custody form | `--jurisdiction co` (default) or `fr`; in a case folder it is fixed at creation |
-| Timestamp | Online TSA by default | `--no-timestamp` offline, then `rv-mailauth timestamp` later; `--tsa-url` for a qualified / ECD TSA |
-| Examiner certificate | Signs every PDF report | `--sign-cert examiner.p12` ([signing](#7-signing-reports-with-the-examiner-certificate)) |
-| One case, one folder | Every tool of the case links to the same registry and case log | Create the case folder on the case volume, e.g. `D:\cases\CASE-2026-014` |
+| Check | How |
+| --- | --- |
+| The installed tool is the genuine release and works | [installation.md](installation.md) steps 2–6: `SHA256SUMS`, provenance, Authenticode, `rv-mailauth self-test`, the sample run |
+| The evidence is a **native export** | `.eml` files or an mbox exported from the mail server or the mailbox, from a verified copy (not printouts or forwards). `.msg` only when nothing else exists — DKIM cannot be evaluated on it ([theory.md B12](theory.md#b12-outlook-msg-and-mbox)). PST/OST are not read: export them first with a documented tool |
+| The DKIM keys valid **when the messages were sent** | From an archived zone of the sender's domain, the provider, or a passive-DNS service with dates. Note where each key comes from: the result is only as good as the key ([theory.md A5](theory.md#a5-why-the-key-matters-and-why-keys-rotate)) |
+| Your organisation's own domains (BEC cases) | The domains a fraudster would imitate: `--own-domain acme.example --own-domain acme-group.example` |
+| The workstation clock | Synchronised (time source noted); the audit log uses it |
+| Legal basis | Mandate to examine the correspondence; data-protection basis ([admissibility.md](admissibility.md#55-personal-data-and-the-secrecy-of-correspondence)) |
 
 ## 2. Case walkthrough
 
-The example case: `CASE-2026-014`, Colombian jurisdiction, examiner Ana Ruiz, a client export on `E:\export`
-(here: the three sample files). Command outputs below come from a real run of the sample against the local test
-TSA (`tests/fake_tsa.py`); paths are shortened.
+Commands and outputs below are real, from the synthetic sample ([examples/](../examples/README.md)) copied to
+`demo\evidence` (paths shortened, timestamps off).
 
-<!-- forge:domain -->
-### 2.1 Intake: register the evidence
+### 2.1 Intake with rv-hashinv
 
-```powershell
-rv-mailauth analyze --case-dir D:\cases\CASE-2026-014 --case CASE-2026-014 --jurisdiction co `
-    -i E:\export -r --hash sha256,md5 --actor "Ana Ruiz" --sign-cert C:\certs\ana-ruiz.p12
-```
-
-```text
-DONE  run 20261021T154339Z-6e298b
-  items: 3  bytes: 234  errors: 0  elapsed: 1.2 s
-  findings: high 0, medium 1, low 0, info 2
-  timestamp: ok 2026-10-21T15:43:40Z
-  report: D:\cases\CASE-2026-014\runs\rv-mailauth\20261021T154339Z-6e298b\reports\statistics.en.html
-  logs:   D:\cases\CASE-2026-014\runs\rv-mailauth\20261021T154339Z-6e298b\logs
-  case:   CASE-2026-014 (intake) registered 3 (new 3), verified 0, mismatched 0, not in registry 0
-```
-
-What happened, in order: the case folder did not exist, so `case.json` was written once (`--case` and
-`--jurisdiction` are needed only now) and `case_created` opened the case log; `run_started` was appended to the
-case log; every file was hashed once with SHA-256 and MD5 and typed by its first bytes; the three files were
-registered as `E0001` (`acta-copia.txt`), `E0002` (`acta.txt`) and `E0003` (`foto-vacaciones.jpg`) — sorted by
-path — in `evidence\registry.json` / `.csv`, and `evidence_registered` recorded the new registry SHA-256 in the
-case log; reports and the custody form of each item now carry its evidence id; the audit chain head was
-timestamped; `run_finished` in the case log recorded the run's final audit head.
-
-Re-running the same intake on unchanged files keeps the ids (`registered 3 (new 0)`). A changed file at a
-registered path gets a new id and `REGISTRY_PATH_CONTENT_CHANGED`. Use `-i` repeatedly, `-r` for subfolders, or
-`--input-list files.txt` (one path per line, `#` comments, relative paths from the list's folder).
-
-### 2.2 Analysis: later tools re-verify every item
-
-Every Rakvor analysis tool (any tool scaffolded from this template, where `CASE_ROLE` is `analysis`) takes the same
-`--case-dir`. Without `-i` it examines every registered item; `--evidence E0001,E0003` selects some.
+rv-hashinv opens the case folder and registers every file once (evidence ids `E0001`…). rv-mailauth is an
+**analysis** tool: it never writes the registry ([case-folder.md](case-folder.md)).
 
 ```powershell
-rv-pdfauth analyze --case-dir D:\cases\CASE-2026-014 --actor "Ana Ruiz" --sign-cert C:\certs\ana-ruiz.p12
+rv-hashinv scan -i demo\evidence --case-dir demo\CASE-DEMO --case CASE-DEMO --jurisdiction co --hash sha256,md5 --actor "Ana Ruiz"
+#   items: 16  bytes: 60323  errors: 0  elapsed: 0.2 s
+#   case:   CASE-DEMO (intake) registered 16 (new 16), verified 0, mismatched 0, not in registry 0
 ```
 
-Before analysing each file, the tool re-hashes it (adding SHA-256 if your selection shares no algorithm with the
-registry, logged as `case_algorithm_added`) and compares it with the registry — by `--evidence` id, else by path,
-else by content. Its summary ends with a line such as
-`case: CASE-2026-014 (analysis) registered 0 (new 0), verified 3, mismatched 0, not in registry 0`. A file that no
-longer matches raises `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high, exit code 3) and **is still analysed**, so the
-examiner can decide; a file never registered raises `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium).
+The mbox is registered as **one** file; its messages become derived items in the analysis (2.3).
 
-> **rv-pdfauth at its current commit does not implement `--case-dir` yet** (its admissibility page lists this as
-> gap G24). Until it does, run it with `--out D:\cases\CASE-2026-014\runs\rv-pdfauth` and compare its `hashes.csv`
-> with `evidence\registry.csv` by SHA-256, as described in rv-pdfauth's own usage guide. Keep that output with the
-> case file.
-<!-- /forge:domain -->
-
-### 2.3 Verify the whole case
+### 2.2 Prepare the DKIM keys
 
 ```powershell
-rv-mailauth verify-case D:\cases\CASE-2026-014
+rv-mailauth keys import demo\dkim-keys.txt --key-file demo\case-keys.txt -o demo\keys-log --case CASE-DEMO --actor "Ana Ruiz"
+# OK  4 DKIM keys written to demo/case-keys.txt (sha256 8c0e8749…f9d7d9)
+#     source demo/dkim-keys.txt sha256 f5de4068…5f09092e
+rv-mailauth keys show demo\case-keys.txt
+# LINE  SELECTOR   DOMAIN               TYPE      BITS
+# 4     ed2026     example.org          ed25519    256
+# 5     m1         mailer.example.com   rsa       2048
+# 6     s2025      example.org          rsa       2048
+# 7     s2026      example.org          rsa       2048
+# 4 usable keys, 0 records not usable
 ```
 
-```text
-OK  case CASE-2026-014: 4 case-log entries, 3 registered items, 1 runs verified: D:\cases\CASE-2026-014
+(Here the sample's public keys stand in for an archive.) `keys import` accepts BIND zone files and `selector._domainkey.domain<TAB>TXT` lists, keeps only DKIM key
+records, refuses malformed records and conflicting duplicates (nothing written, exit 2), never overwrites a key
+file, and writes its own audit log with the SHA-256 of every source. Keep the archive, the key file and that log
+with the case.
+
+### 2.3 Analysis
+
+```powershell
+rv-mailauth analyze --case-dir demo\CASE-DEMO --dkim-keys demo\case-keys.txt --own-domain acme.example --actor "Ana Ruiz"
+# DONE (high-severity findings)  run 20261112T121910Z-2c3dd5
+#   items: 19  bytes: 63410  errors: 0  elapsed: 2.5 s
+#   findings: high 2, medium 13, low 7, info 10
+#   case:   CASE-DEMO (analysis) registered 0 (new 0), verified 16, mismatched 0, not in registry 0
 ```
 
-Every Rakvor tool has `verify-case` and they agree (a case written by the Rust build verifies with the Python
-build and the reverse). It checks the case-log chain, `case.json`, the registry digest, every run's audit chain and
-timestamp tokens, and the cross-links between the case log and each run ([theory.md B7](theory.md#b7-the-case-folder)).
-Exit 0 = intact (warnings, such as a run still in progress, are printed), 3 = broken, 1 = not a case folder.
-By default it does not re-hash the evidence; add `--rehash` to read every registered item that is still reachable
-at its registered path and compare its digests with the registry (a path registered several times is compared with
-its latest registration):
+Exit code 3 here means "completed, with at least one high finding" (two messages whose body no longer matches its
+DKIM signature); it is not an error. Without `--input`, every registered item is analysed; `--evidence E0012`
+analyses one; `-i <file>` analyses a file and matches it against the registry by path, else by content. The run
+re-hashes every file before analysing it: a different digest is `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high), a
+file not in the registry `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium).
 
-```text
-rv-mailauth verify-case D:\cases\CASE-2026-014 --rehash
-OK  case CASE-2026-014: 4 case-log entries, 3 registered items, 1 runs verified: D:\cases\CASE-2026-014
-    re-hashed 3 of 3 registered items: 3 match the registry
-```
+Options that change the analysis (all recorded in `analysis_configured`):
 
-A file that differs is listed as `E0002 <path>: sha256 differs from the registry (registered …, now …)` and the
-exit code is 3; a file not reachable from this workstation is a warning, not a failure.
-
-### 2.4 The same from the desktop app
-
-Start **RV MailAuth**, fill **Case folder** in section 1 (and **Case ID** plus the custody form's jurisdiction for a
-new case), add the evidence (files, folders, drag and drop) — or none, to re-examine every registered item — tick
-one or two hash algorithms, set the report language and examiner in *3. Reports*, the timestamp and certificate in
-*4. Trust*, then **Start review**. The output folder is derived from the case folder and locked; the result panel
-lists every evidence id and its status. Every setting you change before starting is written to the run's audit log
-(`ui_*` actions). The engine, outputs and findings are the same as the CLI's. Details:
-[usage-gui.md](usage-gui.md).
-
-### Starting from RV Hub: `--case-dir` and `describe --json`
-
-RV Hub (the Rakvor launcher) finds the installed tools, opens them on a case folder and suggests which one fits a
-file. It relies on two entry points of RV MailAuth:
-
-- **`rv-mailauth-gui.exe --case-dir <CASE> [FILES...]`** starts the desktop app with **Case folder** already filled
-  (`--case-dir=<CASE>` also works). Other arguments are pre-loaded as evidence, as when files are dropped on the
-  icon. The preset is written to the run's audit log as `ui_case_dir_from_launcher` (path and `at_utc`) followed by
-  `ui_case_dir_changed`. `--case-dir` without a folder is ignored: the window says so and the audit log records
-  `ui_launch_argument_ignored`.
-- **`rv-mailauth describe --json`** prints one JSON object (sorted keys) that RV Hub reads; it is hidden from
-  `rv-mailauth --help` but listed in [usage-cli.md](usage-cli.md). It reads and writes nothing. Schema:
-  [`schemas/describe.schema.json`](../schemas/describe.schema.json) (`rakvor.describe/1`, identical in every Rakvor
-  tool).
-
-| Field | Meaning |
+| Option | Use it when |
 | --- | --- |
-| `schema` | `rakvor.describe/1` |
-| `tool`, `title`, `version` | `rv-mailauth`, `RV MailAuth`, the product version (`version.txt`) |
-| `role` | `intake` (registers evidence in the case folder) |
-| `main_verb` | `analyze`: the command that does the main work |
-| `accepts` | `extensions` (lower case, no dot) and content `signatures` (`format` + `match`: hex bytes at an offset); `"*"` = any file |
-| `case_formats`, `log_formats` | `rakvor.case/1`; `rakvor.audit/1` = `logs/audit.jsonl`, `rakvor.review/1` = `logs/review.jsonl` |
-| `cli_exe`, `gui_exe` | `rv-mailauth.exe`, `rv-mailauth-gui.exe` |
-| `exit_codes` | The meaning of 0, 1, 2, 3 and 130 (table in section 9) |
+| `--dkim-keys FILE` | Always, when DKIM matters. Without it every signature whose body hash matches is `DKIM_KEY_NOT_AVAILABLE` |
+| `--online` | Only when no archive exists, and disclose it: today's DNS may not hold the key used at sending time; each result carries `DKIM_KEY_FROM_CURRENT_DNS` (medium) |
+| `--own-domain D` | BEC cases: enables the lookalike and display-name checks |
+| `--clock-skew S` | Servers known to drift (default 300 s) |
+| `--mbox-variant mboxo` | The exporter wrote mboxo (one `>` stripped only from `>From ` lines); the wrong variant can break a body hash |
+| `--extract-attachments` | You need the attachment files (decoded, hashed, audited); they are always listed with SHA-256 anyway |
+| `--item-reports flagged` | Large mailboxes: per-item reports only for items with findings above informational |
+| `--max-message-mb`, `--max-mbox-messages`, `--worker-timeout`, `--worker-memory-mb` | Very large messages or mailboxes ([usage-cli.md](usage-cli.md#rv-mailauth-analyze)) |
+
+### 2.4 Review in the desktop app
+
+Start `rv-mailauth-gui`, fill **Case folder** (or let RV Hub open it), run, then open any message from the results
+table: the **message viewer** shows the addresses, the Received hops with the time between them, the DKIM/ARC
+table with the key source, the header table, the attachments and the findings — only after checking that
+`headers.json` and `dkim.json` still have the digests recorded in the audit log. Each opening is written to the
+run's `review.jsonl` ([usage-gui.md](usage-gui.md)).
+
+### 2.5 Verify the whole case
 
 ```powershell
-rv-mailauth describe --json
+rv-mailauth verify-case demo\CASE-DEMO --rehash
+# OK  case CASE-DEMO: 6 case-log entries, 16 registered items, 2 runs verified: demo/CASE-DEMO
+#     re-hashed 16 of 16 registered items: 16 match the registry
+rv-mailauth verify-log demo\CASE-DEMO\runs\rv-mailauth\20261112T121910Z-2c3dd5\logs
+# OK  156 entries, chain intact: …\audit.jsonl
+#     truncation: the final entry #156 is anchored by the case log (run_finished)
 ```
+
+After two messages were opened in the viewer, both commands add a line: `review entries: 2 (review.jsonl,
+anchored to run_finished)` for `verify-log`, `review entries: 2` for `verify-case`. rv-hashinv 0.3.1's `verify-case` also
+accepts the folder (shared case code; it does not print review entries). Then hand over the case folder, the key file and its import
+log.
 
 ## 3. Reading the outputs
 
-```mermaid
-flowchart TB
-    CASE["&lt;CASE&gt;/"] --> CJ["case.json · case-log.jsonl"]
-    CASE --> EV["evidence/registry.json · registry.csv"]
-    CASE --> RUN["runs/rv-mailauth/&lt;RUN-ID&gt;/"]
-    RUN --> L["logs/<br/>audit.jsonl · audit.log · hashes.csv<br/>environment.json · timestamp-NNNNN.tsr/.json"]
-    RUN --> R["reports/<br/>statistics.json/.LANG.html/.LANG.pdf"]
-    R --> I["items/NNNNN-name/"]
-    I --> T["technical.* — examiner, opposing expert"]
-    I --> S["summary.* — client"]
-    I --> K["custody.* — custody record"]
+```text
+CASE-DEMO\runs\rv-mailauth\<RUN-ID>\
+  logs\      audit.jsonl (+ audit.log), hashes.csv, environment.json, timestamp-*.tsr/.json, review.jsonl
+  reports\   statistics.json / .<lang>.html / .pdf
+             items\00001-01-clean-rsa.eml\        headers.json, dkim.json, technical.*, summary.*, custody.*
+             items\00012-12-mailbox.mbox\         mbox_index.json (+ reports of the container)
+             items\00012-12-mailbox.mbox_2_1372\  message 2 of the mbox, at byte 1372
 ```
 
-Without `--case-dir`, `logs\<RUN-ID>\` and `reports\<RUN-ID>\` are created under `--out` (default `.\rakvor-out`).
-
-| Output | For | What to use it for |
-| --- | --- | --- |
-| `statistics.*` | Examiner, lawyer | Run overview: who, when, interface, algorithms, totals and throughput, findings by severity and code, items by detected type, duplicate groups (paths), the case-folder section (registered / added / verified / mismatched / not registered), timestamp status, signer, audit chain head and entry count at the time it was written |
-| `technical.*` | Examiner, opposing expert | One file: path, size, modification time, extension, detected type, status, evidence id and intake date (case folder), all digests, findings with *what it shows / what it does not prove*, method, audit entries `#first–#last`, limitations |
-| `summary.*` | Client | Plain-language status, the primary fingerprint, the findings in one sentence each, the next step |
-| `custody.*` | Custody record | Jurisdiction form (Spanish for `co`, French for `fr`) + English copy, pre-filled from the run, with 6 blank transfer rows to sign. An internal record, used **alongside** the official form ([admissibility.md](admissibility.md#consolidated-gap-list) G9) |
-| `audit.jsonl` / `audit.log` | Verification | Every action, hash-chained / the same, readable (not authoritative) |
-| `hashes.csv` | Verification | Hash register: `index,path,size,<algo1>[,<algo2>],status,error` |
-| `environment.json` | Reproducibility | Tool, compiler, every dependency version, OS, host, user, command line (or GUI settings) |
-| `timestamp-NNNNN.tsr` / `.json` | Verification | RFC 3161 response for audit entry NNNNN, and its summary |
-| `case.json`, `case-log.jsonl` | Verification | Case identity (written once); every tool run on the case, registry changes, final audit heads |
-| `evidence\registry.json` / `.csv` | Everyone | The evidence list of the case: id, path at intake, size, digests, which run registered it and when |
-
-**Status and next step per item:** `problem` (a high finding: do not rely on the file until explained),
-`attention` (medium or low: review with the examiner), `ok` (informational only). **Exit code 3** means
-"completed, at least one high-severity finding" — a normal outcome for evidence, not an error.
+Start with `statistics.<lang>.html` (counts and the item table), then the technical review of each flagged item.
+`hashes.csv` lists every evidence file and every mbox message (`<mbox>#<n>@<offset>`). The fields of every file:
+[reports.md](reports.md#per-message-outputs).
 
 ## 4. Interpreting each finding
 
-Severity in brackets. "Check next" is what an examiner should do before relying on the finding; "do not
-conclude" is the overreach to avoid in a report. The exact wording printed in reports is in `i18n/en.json` (es, fr).
+What the examiner does next; the wording printed in the reports is in
+[reports.md](reports.md#findings-catalogue).
 
-<!-- forge:domain -->
-| Code | Check next | Do not conclude |
+| Finding (severity) | Look at | Do not conclude |
 | --- | --- | --- |
-| `EXTENSION_MISMATCH` (medium) | The detected type; open the file with a tool for that type; ask how the file was named at the source | Intent to hide anything — exports, downloads and messaging apps rename files |
-| `EXECUTABLE_CONTENT` (high) | Confirm with a PE/ELF parser (a 2-byte `MZ` match can be a false positive); treat as hostile; analyse in a sandbox | That the program is malicious, or that anyone ran it |
-| `EMPTY_FILE` (info) | Whether the source holds the file with content; the size at acquisition | That it was emptied on purpose |
-| `DUPLICATE` (info) | The group in `statistics.*` (paths) and `hashes.csv`; check the primary algorithm is SHA-256 | Who copied the file, when, or which copy is the original |
-| `UNREADABLE` (high) | The OS error (permissions, locks, path length); re-acquire and re-run; unreadable items are **not** registered | That the file is damaged or was hidden |
-| `REGISTRY_PATH_CONTENT_CHANGED` (medium) | Both evidence ids in `registry.csv`; which run registered each; how the source changed between intakes | Which version is the original, or why it changed |
-<!-- /forge:domain -->
-
-| Code (case folder, analysis tools) | Check next | Do not conclude |
-| --- | --- | --- |
-| `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high) | Expected and actual digest in the finding; re-hash the file and the intake copy by hand; check storage, transfers and who had access since intake (case log) | Who changed it, when, or that it was deliberate |
-| `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium) | Whether the file should have gone through intake; register it (intake run) if it is new evidence | That the file is altered or irrelevant |
+| `DKIM_BODY_HASH_MISMATCH` (high) | The `bh=` of the signature; any footer, list or forwarder in the hops; ask for another copy (sender's sent item, server export) and compare | Who changed the body, or that it was malicious |
+| `DKIM_SIGNATURE_INVALID` (medium) | The key's provenance and validity dates for `s=`; which signed headers (`h=`) look edited; re-run with the key valid at sending time | That headers were edited — a rotated or wrong key gives the same result |
+| `DKIM_KEY_NOT_AVAILABLE` (info) | Obtain the key for the named selector; re-run | Anything about the signature |
+| `DKIM_KEY_FROM_CURRENT_DNS` (medium) | Replace it with an archived key; disclose otherwise | Anything certain about the key at sending time |
+| `DKIM_SIGNATURE_NOT_EVALUATED` (low) | The reason: `msg_body_not_original` (ask for the MIME original), "signature expired" (the `x=` tag is before today: check `bh=` by hand, gap G-MAIL4) | Anything about the message |
+| `DKIM_DOMAIN_NOT_ALIGNED` (medium) | Whether the signing domain is the sender's mail provider or marketing service | Spoofing |
+| `ARC_CHAIN_INVALID` (medium) | The forwarders in the hops; supply the sealers' keys | Tampering |
+| `RECEIVED_TIME_NOT_MONOTONIC`, `DATE_AFTER_FIRST_HOP`, `TIMEZONE_INCONSISTENT` | Which servers stamped the hops (the recipient's own hops are the reliable ones); the sender's device clock and zone | That a header was inserted or a date changed |
+| `MESSAGE_ID_DOMAIN_MISMATCH` (low) | The sending client or service that generates Message-IDs | Forgery |
+| `ATTACHMENT_DATE_AFTER_SENT` (medium) | The attachment's own metadata; other copies of the attachment | That the attachment was swapped |
+| `MSG_TRANSPORT_HEADERS_MISSING` (medium) | Whether the `.msg` is a draft or sent item; ask for the original | That headers were removed |
+| `LOOKALIKE_DOMAIN`, `REPLY_TO_DIFFERS`, `DISPLAY_NAME_SPOOF` (medium) | Who owns the domain (registration date, WHOIS), whether the counterpart really uses that address, earlier genuine correspondence | Intent to deceive |
+| `PAYMENT_DETAILS_MENTIONED` (info) | Whether bank details changed compared with earlier genuine messages; confirm by phone with a known contact | Fraud |
+| `AUTH_RESULTS_RECORDED` (info) | Which server wrote it (`authserv_id`): only the recipient's own server's line is meaningful | That SPF/DKIM/DMARC passed — the line is a claim, not re-checked |
+| `FILE_STRUCTURE_DAMAGED`, `PARSER_FAILED` (medium) | Another copy or export; `PARSER_FAILED` gives the reason (timeout, memory limit) — raise the limit and re-run | That the file was damaged on purpose |
+| `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high) | Both digests in the report; which copy was analysed | Who changed the file |
 
 ## 5. Working without a case folder
 
-The same command works standalone for a quick inventory (no registry, no case log):
+The same command works standalone (no registry, no case log); outputs go to `--out` (default `.\rakvor-out`):
 
 ```powershell
-rv-mailauth analyze -i D:\evidence -r --hash sha256,md5 --lang all --case CASE-2026-014 --out D:\work\inventory
-rv-mailauth analyze --input-list files.txt --progress jsonl > events.jsonl      # one JSON event per line on stdout
+rv-mailauth analyze -i D:\export -r --hash sha256,md5 --lang all --case CASE-2026-014 --dkim-keys case-keys.txt --own-domain acme.example --out D:\work\mail
 ```
 
-`--progress jsonl` prints every event (`run_started`, `item_started`, `item_hashed`, `progress` with elapsed time
-and ETA, `item_finished`, `evidence_linked`, `error`, `cancelled`, `timestamp`, `report_written`, `run_finished`)
-for scripts; a closed stdout never aborts the run. **Ctrl+C** stops after the current 1 MiB chunk: partial reports are written,
-`run_cancelled` is logged, exit code 130.
+Without a case folder, nothing outside the run anchors the end of its audit log except the RFC 3161 timestamp
+([§8](#8-verifying-a-run)); use a case folder for casework.
 
 ## 6. Timestamps
 
 By default each run asks the TSA (`http://timestamp.digicert.com`, change with `--tsa-url`) to sign the audit
 chain head just before the statistics report is written. The token covers every evidence digest, finding and
 item-report digest recorded before it, not the statistics report and `run_finished` written after it
-([theory.md B8](theory.md#b8-rfc-3161-trusted-timestamp)).
+([theory.md B15](theory.md#b15-rfc-3161-trusted-timestamp)).
 
 | Situation | What happens | What to do |
 | --- | --- | --- |
@@ -320,24 +265,28 @@ Anyone — you, a colleague, an opposing expert — can check a run with its log
 evidence copy:
 
 ```powershell
-rv-mailauth verify-log D:\cases\CASE-2026-014\runs\rv-mailauth\20261021T154339Z-6e298b\logs
-# OK  25 entries, chain intact: …\audit.jsonl
-#     timestamp 2026-10-21T15:43:40Z by http://127.0.0.1:33481/tsr covers entry #22
-#     truncation: the final entry #25 is anchored by the case log (run_finished)
+rv-mailauth verify-log demo\CASE-DEMO\runs\rv-mailauth\20261112T121910Z-2c3dd5\logs
+# OK  156 entries, chain intact: …\audit.jsonl
+#     truncation: the final entry #156 is anchored by the case log (run_finished)
+#     review entries: 2 (review.jsonl, anchored to run_finished)
+# with a timestamp, one more line per token, e.g.:
+#     timestamp 2026-11-12T11:52:14Z by http://timestamp.digicert.com covers entry #137: TSA signature valid (signer: …); chain not checked (…)
 ```
 
-The last line says what vouches for the length of the log. A standalone run with a timestamp prints
-`truncation: entries up to #22 are anchored by the RFC 3161 timestamp (timestamp-00022.json); 3 entries after it
+The `truncation:` line says what vouches for the length of the log; `review entries` counts the messages opened
+in the GUI viewer after the run (an edited `review.jsonl`, or one copied from another run, makes the log
+`BROKEN`). A standalone run with a timestamp prints
+`truncation: entries up to #137 are anchored by the RFC 3161 timestamp (timestamp-00137.json); 3 entries after it
 (timestamp_obtained, statistics_report_written, run_finished) cannot be proven complete`; a standalone run without
 a timestamp prints `truncation not detectable without a timestamp or case record`. A log shorter than its
 timestamp or case record is `BROKEN` (`truncated: …`, exit 3).
 
 | Step | Command | Proves |
 | --- | --- | --- |
-| 1 | `rv-mailauth verify-log <log>` (exit 0 intact, 3 broken or truncated) | No entry edited, deleted or reordered; timestamp token matches the head it covers; the log still reaches the entry its timestamp covers and, in a case folder, the final entry recorded in the case log (the `truncation:` line names the anchor) |
+| 1 | `rv-mailauth verify-log <log>` (exit 0 intact, 3 broken or truncated) | No entry edited, deleted or reordered; timestamp token matches the head it covers; the log still reaches the entry its timestamp covers and, in a case folder, the final entry recorded in the case log (the `truncation:` line names the anchor); `review.jsonl` intact and anchored to this run |
 | 2 | `python tests/verify_chain.py <log>` (source tree) | Same, with an independent implementation; also re-hashes the evidence listed in `hashes.csv` |
 | 3 | OpenSSL ([Timestamps](#6-timestamps)) | The TSA really signed that head at that time |
-| 4 | Script below | Every report file, `environment.json` and `hashes.csv` still has the digest recorded in the log |
+| 4 | Script below | Every report file, every per-message output (`headers.json`, `dkim.json`, attachments, `mbox_index.json`), `environment.json` and `hashes.csv` still has the digest recorded in the log |
 | 5 | `rv-mailauth verify-case <CASE> --rehash` | The run is the one the case log announced, complete up to its recorded final entry; the reachable evidence still matches the registry |
 | 6 | `python tests/validate_reports.py <CASE or report folder>` | Every JSON report, `case.json` and `registry.json` match their schemas |
 
@@ -356,6 +305,8 @@ for line in (log / "audit.jsonl").open(encoding="utf-8"):
         files = {rep / d["folder"] / k: v for k, v in d["files"].items()}
     elif a == "statistics_report_written":
         files = {rep / k: v for k, v in d["files"].items()}
+    elif a == "output_written":
+        files = {rep / d["file"]: d["hashes"]}
     elif a in ("environment_recorded", "hash_register_written"):
         files = {log / e["item"]: d}
     else:
@@ -370,7 +321,7 @@ print(f"{checked} files checked, {bad} mismatches"); sys.exit(3 if bad else 0)
 EOF
 ```
 
-On the sample run (3 items, one language) this checks 38 files; appending one byte to `statistics.json` gives
+On the sample run in a case folder (19 items, English reports) this checks 251 files; appending one byte to `statistics.json` gives
 `MISMATCH … statistics.json` and exit code 3. A single file in PowerShell: `(Get-FileHash <file> -Algorithm
 SHA256).Hash.ToLower()` and search the value in `audit.jsonl`.
 
@@ -380,22 +331,29 @@ SHA256).Hash.ToLower()` and search the value in `audit.jsonl`.
 
 | Command | 0 | 1 | 2 | 3 | 130 |
 | --- | --- | --- | --- | --- | --- |
-| `analyze` | done, no high finding | runtime error (input not found, output not writable, wrong certificate password, case log locked) | usage error (unknown option or algorithm, three algorithms, unknown language; with `--case-dir`: another case's folder, `--case` missing at creation, unknown evidence id) | done, ≥ 1 high finding; or the case folder fails verification (nothing written) | cancelled (Ctrl+C), partial reports written |
+| `analyze` | done, no high finding | runtime error (input not found, output not writable, wrong certificate password, case log locked) | usage error (unknown option or algorithm, three algorithms, unknown language, a `--dkim-keys` file that cannot be read, an invalid `--own-domain`; with `--case-dir`: another case's folder, `--case` missing at creation, unknown evidence id) | done, ≥ 1 high finding; or the case folder fails verification (nothing written) | cancelled (Ctrl+C), partial reports written |
 | `verify-log` | intact | log unreadable | — | broken chain, token mismatch, or truncated (shorter than its timestamp or case record) | — |
 | `verify-case` | case intact (warnings printed) | not a case folder (no `case.json`) | — | at least one check failed (with `--rehash`: an evidence file differs from the registry) | — |
 | `timestamp` | obtained and logged | TSA unreachable (nothing changed) | — | log missing, broken or unreadable (nothing added) | — |
+| `keys import` | key file written, import logged | a source unreadable, the key file exists or cannot be written | usage error, a malformed DKIM record, two keys under one name, or no DKIM record (nothing written) | — | — |
+| `keys show` | every record is a usable key | file unreadable | at least one record is not a usable key (listed) | — | — |
 | `self-test` | all pass | a failure: do not use the build | — | — | — |
 | `describe` | description printed | — | usage error (unknown option) | — | — |
 
 ### Messages
 
-<!-- forge:domain -->
 | Message | Fix |
 | --- | --- |
 | `at most 2 hash algorithms can run at the same time (got 3)` | Pick one or two algorithms |
 | `unknown hash algorithm '…': use md5, sha1, sha256, sha512, sha3-256 or blake3` | Spelling: `sha3-256` (also `sha3`, `sha3_256`) |
 | `… is neither a file nor a folder (symbolic links are not followed)` | Point at the link's target, or copy it |
-<!-- /forge:domain -->
+| `--dkim-keys …: not a readable file` (exit 2) | Check the path; run `rv-mailauth keys show <file>` |
+| `'…' is not a domain name (e.g. acme.example)` (exit 2) | `--own-domain` takes domains, not addresses or URLs (`@acme.example` and a trailing dot are accepted) |
+| `error: not imported (nothing written): records that are not usable DKIM keys:` (`keys import`) | Fix or remove the listed records (a name relative to `$ORIGIN` must be written in full: `selector._domainkey.domain`) |
+| `error: … already exists: choose another --key-file` (`keys import`) | An imported key file is never overwritten: pick a new name |
+| Every signature is `DKIM_KEY_NOT_AVAILABLE` | No `--dkim-keys`, or the key file has no record for those `s=`/`d=`; `keys show` lists what it holds |
+| `PARSER_FAILED` (reason `timeout` or `memory_limit`) | Raise `--worker-timeout` / `--worker-memory-mb` and re-run; the rest of the run is unaffected |
+| An mbox message fails DKIM while the other copies verify | Try `--mbox-variant mboxo` (or `mboxrd`) to match the exporter ([theory.md B12](theory.md#b12-outlook-msg-and-mbox)) |
 
 | Message | Fix |
 | --- | --- |
