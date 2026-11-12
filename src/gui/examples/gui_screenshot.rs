@@ -203,6 +203,9 @@ fn main() {
         ..Default::default()
     };
     s.add_input(root.join("examples/sample/evidence"));
+    // Two algorithms, as the GUI contract shows (the other checkboxes are then disabled).
+    s.toggle_algo(rv_mailauth_core::HashAlgo::Blake3)
+        .expect("second algorithm");
     s.set_option(OptionChange::DkimKeys(
         root.join("examples/sample/dkim-keys.txt")
             .canonicalize()
