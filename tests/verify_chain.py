@@ -11,6 +11,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import sys
 
 GENESIS = "0" * 64
@@ -43,13 +44,31 @@ def verify_chain(path: str) -> list[str]:
     return problems
 
 
-def digest(path: str, algo: str) -> str:
+# A message inside an mbox is registered as "<mbox path>#<n>@<offset>": <offset> is where its "From " separator
+# line starts, and the recorded digests cover the `size` raw bytes that follow that line (no un-escaping).
+MBOX_ITEM = re.compile(r"^(?P<mbox>.+)#(?P<n>\d+)@(?P<offset>\d+)$")
+
+
+def digest(path: str, algo: str, size: int | None = None) -> str:
     if algo == "blake3":
         import blake3  # pip install blake3
 
         h = blake3.blake3()
     else:
         h = hashlib.new({"sha3-256": "sha3_256"}.get(algo, algo))
+    m = MBOX_ITEM.match(path)
+    if m and not os.path.exists(path):
+        if size is None:
+            raise OSError(f"{path}: mbox message without a recorded size")
+        with open(m["mbox"], "rb") as fh:
+            fh.seek(int(m["offset"]))
+            if not fh.readline().startswith(b"From "):
+                raise OSError(f"{path}: no mbox 'From ' line at offset {m['offset']}")
+            data = fh.read(size)
+        if len(data) != size:
+            raise OSError(f"{path}: mbox ends before {size} bytes")
+        h.update(data)
+        return h.hexdigest()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
@@ -66,7 +85,7 @@ def verify_register(path: str) -> list[str]:
                 continue
             for a in algos:
                 try:
-                    got = digest(row["path"], a)
+                    got = digest(row["path"], a, int(row["size"]) if row["size"] else None)
                 except OSError as e:
                     problems.append(f"{row['path']}: {e}")
                     break
