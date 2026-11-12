@@ -3942,6 +3942,7 @@ name = "rv-mailauth-gui"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "png",
  "rfd",
  "rv-mailauth-core",
  "serde_json",

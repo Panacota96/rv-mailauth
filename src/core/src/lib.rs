@@ -25,6 +25,7 @@ pub mod model;
 pub mod msg;
 pub mod psl;
 pub mod report;
+pub mod review;
 pub mod run;
 pub mod time;
 pub mod trust;
