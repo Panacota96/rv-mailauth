@@ -37,6 +37,9 @@ struct Scanner {
     seps: Vec<(u64, u64, String, u64)>,
     not_listed: u64,
     max: u64,
+    /// Where the first separator beyond `max` starts, minus its preceding blank line: the end of the last
+    /// listed message. Without it that message would run to the end of the file and cover the unlisted ones.
+    first_unlisted_end: Option<u64>,
     /// Some(length incl. terminator) when the previous line was empty
     prev_blank_len: Option<u64>,
 }
@@ -55,6 +58,10 @@ impl Scanner {
                 let fl = String::from_utf8_lossy(content).into_owned();
                 self.seps.push((line_start, line_end, fl, blank));
             } else {
+                if self.not_listed == 0 {
+                    let blank = self.prev_blank_len.unwrap_or(0);
+                    self.first_unlisted_end = Some(line_start.saturating_sub(blank));
+                }
                 self.not_listed += 1;
             }
         }
@@ -69,6 +76,7 @@ pub fn scan<R: Read>(mut r: R, path_id: &str, max: u64) -> std::io::Result<Scan>
         seps: Vec::new(),
         not_listed: 0,
         max,
+        first_unlisted_end: None,
         prev_blank_len: None,
     };
     let mut pos: u64 = 0;
@@ -103,7 +111,7 @@ pub fn scan<R: Read>(mut r: R, path_id: &str, max: u64) -> std::io::Result<Scan>
     for (i, (off, body_start, fl, _)) in seps.iter().enumerate() {
         let end = match seps.get(i + 1) {
             Some((next, _, _, blank)) => next.saturating_sub(*blank),
-            None => total,
+            None => sc.first_unlisted_end.unwrap_or(total),
         };
         messages.push(MboxMessageRef {
             n: i as u64 + 1,
@@ -274,6 +282,15 @@ mod tests {
         let s = scan(BOX, "box", 1).unwrap();
         assert_eq!(s.messages.len(), 1);
         assert_eq!(s.not_listed, 2);
+        // The last listed message still ends at the next separator, not at the end of the file: with a cap
+        // its bytes (and so its hashes and DKIM result) are the same as without one.
+        let full = scan(BOX, "box", 100).unwrap();
+        assert_eq!(s.messages[0].length, full.messages[0].length);
+        let m = &s.messages[0];
+        assert_eq!(
+            &BOX[m.message_offset as usize..(m.message_offset + m.length) as usize],
+            b"From: a@example.org\r\n\r\nhello\r\n>From the start\r\n"
+        );
         let g = scan(&b"no separator here\nat all"[..], "g", 10).unwrap();
         assert!(g.messages.is_empty());
         assert_eq!(g.leading_bytes, 24);
