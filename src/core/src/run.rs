@@ -712,6 +712,17 @@ fn pipeline(
             log_dir: log_dir_s.clone(),
         };
         let dir = report_dir.join("items").join(r.folder());
+        // `--item-reports flagged`: no report files for items without findings above info (still listed in
+        // the statistics report; the skip is audited).
+        if cfg.domain.item_reports_flagged_only && r.status() == "ok" {
+            log.record(
+                "item_reports_skipped",
+                Some(&r.path.display().to_string()),
+                json!({"folder": format!("items/{}", r.folder()), "status": r.status(), "reason": "item_reports_flagged_only"}),
+            )
+            .map_err(io)?;
+            continue;
+        }
         let files = report::write_item_reports(&dir, &info, r, &audit)?;
         log.record(
             "item_reports_written",
@@ -839,6 +850,7 @@ fn record_analysis_options(d: &DomainOptions, log: &mut AuditLog) -> std::io::Re
             "mbox_variant": d.mbox_variant, "max_message_bytes": d.max_message_bytes,
             "max_mbox_messages": d.max_mbox_messages, "worker_timeout_s": d.worker_timeout_s,
             "worker_memory_mb": d.worker_memory_mb,
+            "item_reports": if d.item_reports_flagged_only { "flagged" } else { "all" },
             "isolation_requested": isolation_name(&d.isolation),
             "isolation": isolation_name(&crate::worker::resolve(&d.isolation)),
             "worker_exe": match crate::worker::resolve(&d.isolation) { crate::model::Isolation::Subprocess { exe } => Some(exe.display().to_string()), _ => None },
