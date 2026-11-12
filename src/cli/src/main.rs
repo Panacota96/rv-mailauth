@@ -258,7 +258,11 @@ CHECKS:
     a case folder (<CASE>/runs/<TOOL>/<RUN-ID>/logs), end with the audit head that the case log
     recorded at run_finished (only timestamp_obtained may follow). Entries after the last
     anchored one are listed as not provable; with neither record the output says
-    \"truncation not detectable without a timestamp or case record\".
+    \"truncation not detectable without a timestamp or case record\";
+  - the review log: review.jsonl in the same folder (messages opened in the GUI viewer after the
+    run) is checked when present: an intact hash chain whose first entry links to the run's
+    run_finished entry, every entry naming this run. The output adds \"review entries: N\"; an
+    edited review log, or one copied from another run, is a failure.
 
 EXAMPLES:
   rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
@@ -271,7 +275,8 @@ EXIT CODES:
   1  The log or the --tsa-ca file cannot be read.
   3  The chain is broken (an entry was edited, deleted or re-ordered), a timestamp does not
      match or does not verify (altered token, invalid TSA signature, chain not trusted by
-     --tsa-ca), or the log is shorter than its timestamp or case record says (truncated).")]
+     --tsa-ca), the log is shorter than its timestamp or case record says (truncated), or
+     review.jsonl is broken or anchored to another run.")]
     VerifyLog {
         /// Path to audit.jsonl, or to the run's log folder that contains it.
         ///
@@ -1130,6 +1135,9 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             println!("    {}", t);
         }
         println!("    {}", v.truncation);
+        if let Some(r) = v.review_entries {
+            println!("    review entries: {r} (review.jsonl, anchored to run_finished)");
+        }
     } else {
         println!("BROKEN  {}", path.display());
         for p in &v.problems {

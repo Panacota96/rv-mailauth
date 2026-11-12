@@ -252,6 +252,65 @@ fn bulk_scan_writes_reports_logs_and_verifiable_chain() {
 }
 
 #[test]
+fn verify_log_checks_the_review_log() {
+    let out = tempfile::tempdir().unwrap();
+    bin()
+        .args(["analyze", "-i"])
+        .arg(sample())
+        .args(["--progress", "none", "-o"])
+        .arg(out.path())
+        .assert()
+        .code(0);
+    let logs = only_dir(&out.path().join("logs"));
+    for i in 1..=2 {
+        rv_mailauth_core::review::append(
+            &logs,
+            "ci",
+            "ui_message_viewed",
+            serde_json::json!({"index": i, "digest_ok": true}),
+        )
+        .unwrap();
+    }
+    bin()
+        .arg("verify-log")
+        .arg(&logs)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains(
+            "review entries: 2 (review.jsonl, anchored to run_finished)",
+        ));
+
+    // An edited review log fails verify-log.
+    let review = logs.join("review.jsonl");
+    let good = std::fs::read_to_string(&review).unwrap();
+    std::fs::write(&review, good.replace("\"index\":2", "\"index\":3")).unwrap();
+    bin().arg("verify-log").arg(&logs).assert().code(3).stdout(
+        predicate::str::contains("BROKEN").and(predicate::str::contains(
+            "review.jsonl: review line 2: entry_hash does not match its content",
+        )),
+    );
+
+    // A review log copied next to another run (misplaced) fails too.
+    std::fs::write(&review, &good).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    bin()
+        .args(["analyze", "-i"])
+        .arg(sample())
+        .args(["--progress", "none", "-o"])
+        .arg(other.path())
+        .assert()
+        .code(0);
+    let other_logs = only_dir(&other.path().join("logs"));
+    std::fs::write(other_logs.join("review.jsonl"), &good).unwrap();
+    bin()
+        .arg("verify-log")
+        .arg(&other_logs)
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("not anchored to run_finished"));
+}
+
+#[test]
 fn jsonl_progress_is_one_event_per_line_with_elapsed_time() {
     let out = tempfile::tempdir().unwrap();
     let o = bin()
