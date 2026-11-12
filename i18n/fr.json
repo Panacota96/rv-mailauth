@@ -44,11 +44,13 @@
     "page": "Page",
     "of": "sur",
     "generated_by": "Généré par",
+    "flagged_only_note": "Les rapports par élément n’ont été écrits que pour les éléments ayant des constats au-dessus du niveau informatif (--item-reports flagged). Les éléments sans lien n’ont pas de dossier de rapport : leur statut et leur nombre de constats sont indiqués ici.",
+    "item_report_not_written": "pas de rapport par élément : mode éléments signalés uniquement",
     "cancelled_note": "L'exécution a été annulée par l'utilisateur ; seuls les éléments traités avant l'annulation sont rapportés.",
     "none": "Aucun",
     "unknown": "inconnu",
     "method": "Méthode",
-    "method_text": "Chaque fichier a été ouvert en lecture seule, haché en une seule passe avec les algorithmes choisis et comparé à une table de signatures de fichiers. Chaque action a été inscrite dans un journal d'audit chaîné par empreintes.",
+    "method_text": "Chaque fichier a été lu une fois pour calculer ses empreintes, puis analysé comme message : .eml comme message RFC 5322, .msg par ses propriétés MAPI et chaque message d'un mbox comme élément à part entière (chacun dans un processus de travail distinct avec limites de temps et de mémoire lorsque l’isolation est activée, comme le consigne le journal d’audit). La section d'en-têtes, les sauts Received et les dates ont été lus et comparés ; les signatures DKIM et ARC ont été vérifiées hors ligne avec les clés publiques fournies par l'expert (aucune requête DNS sauf en mode en ligne) ; les en-têtes Authentication-Results ont été consignés comme déclarations ; les pièces jointes ont été hachées ; et des heuristiques BEC ont comparé les adresses aux domaines propres de l'organisation. Chaque étape et chaque fichier écrit figurent dans le journal d'audit chaîné par hachage.",
     "conclusion": "Conclusion",
     "what_we_did": "Ce que nous avons fait",
     "what_we_found": "Ce que nous avons constaté",
@@ -91,7 +93,40 @@
     "mismatched": "Différents du registre",
     "unregistered": "Absents du registre",
     "intake_date": "Enregistré à la réception (UTC)",
-    "case_dir": "Dossier de l'affaire"
+    "case_dir": "Dossier de l'affaire",
+    "mail_section": "Analyse du message",
+    "mail_message_id": "Message-ID",
+    "mail_from": "Expéditeur (From)",
+    "mail_reply_to": "Répondre à (Reply-To)",
+    "mail_return_path": "Return-Path",
+    "mail_subject": "Objet",
+    "mail_date": "En-tête Date",
+    "mail_hops": "Sauts Received (premier serveur = 1)",
+    "mail_hop": "Saut",
+    "mail_hop_from": "Depuis",
+    "mail_hop_by": "Reçu par",
+    "mail_hop_date": "Date inscrite",
+    "mail_dkim": "Signatures DKIM (vérification hors ligne)",
+    "mail_dkim_domain": "Domaine (d=)",
+    "mail_dkim_selector": "Sélecteur (s=)",
+    "mail_dkim_algorithm": "Algorithme",
+    "mail_dkim_result": "Résultat",
+    "mail_key_source": "Origine de la clé",
+    "mail_dkim_mode": "Mode DKIM / fichier de clés",
+    "mail_dkim_not_evaluated": "DKIM non évalué",
+    "mail_arc": "Chaîne ARC",
+    "mail_auth_results": "Authentication-Results (tels que déclarés par les serveurs)",
+    "mail_attachments": "Pièces jointes",
+    "mail_attachment_name": "Nom",
+    "mail_attachment_type": "Type",
+    "mail_attachment_size": "Taille (octets)",
+    "mail_outputs": "Fichiers écrits par l'analyse",
+    "mail_mbox_message": "Message dans le mbox",
+    "mail_mbox_messages": "Messages dans ce mbox",
+    "mail_not_completed": "L'analyse du message n'a pas abouti.",
+    "mail_none": "aucun",
+    "mail_derived_from": "Issu de (scellé mbox)",
+    "mail_derived_text": "Message n° %{n} du mbox %{container} (%{hashes}), stocké à partir de l'octet %{offset}, %{length} octets (ligne de séparation à l'octet %{separator}). La garde de ces octets est celle du fichier mbox."
   },
   "severity": {
     "high": "Élevée",
@@ -139,13 +174,129 @@
       "title": "Le chemin enregistré contient désormais un autre contenu",
       "shows": "Ce chemin a déjà été enregistré comme %{previous_id} avec un autre contenu ; le contenu actuel reçoit un nouvel ID d'élément.",
       "does_not_prove": "Quelle version est l'originale ni pourquoi le contenu a changé."
+    },
+    "DKIM_BODY_HASH_MISMATCH": {
+      "title": "Empreinte DKIM du corps non concordante",
+      "shows": "La signature DKIM de %{d} (sélecteur %{s}) enregistre une empreinte du corps du message différente de celle du corps actuel : le corps n'est pas celui qui a été signé.",
+      "does_not_prove": "Cela n'indique ni qui a modifié le corps, ni quand, ni pourquoi : transferts, listes de diffusion, mentions antivirus et réencodage par un client de messagerie modifient aussi le corps après la signature."
+    },
+    "DKIM_SIGNATURE_INVALID": {
+      "title": "La signature DKIM ne se vérifie pas",
+      "shows": "Le corps correspond toujours à la signature DKIM de %{d} (sélecteur %{s}), mais la signature des en-têtes signés ne se vérifie pas avec la clé publique fournie (origine de la clé : %{key_source} ; vérificateur : %{reason}). Soit des en-têtes signés ont changé après la signature, soit la clé fournie n'est pas celle qui a signé (par exemple une clé renouvelée).",
+      "does_not_prove": "Cela n'indique pas laquelle des deux situations s'est produite, ni qui a modifié un en-tête ni pourquoi ; avec une clé renouvelée ou erronée, un message authentique donne le même résultat."
+    },
+    "DKIM_KEY_FROM_CURRENT_DNS": {
+      "title": "Clé DKIM issue du DNS actuel",
+      "shows": "La clé de %{d} (sélecteur %{s}) n'était pas dans le fichier de clés de l'expert et a été obtenue du DNS au moment de l'analyse (mode en ligne).",
+      "does_not_prove": "Une clé publiée aujourd'hui peut ne pas être celle qui a signé le message ; un résultat valide ou invalide avec elle ne dit rien de certain sur la clé en vigueur lors de l'envoi."
+    },
+    "DKIM_DOMAIN_NOT_ALIGNED": {
+      "title": "Signature DKIM valide d'un autre domaine",
+      "shows": "Le message ne porte une signature DKIM valide que pour %{d}, qui ne partage pas son domaine organisationnel avec le domaine de l'expéditeur (From) %{from_domain}.",
+      "does_not_prove": "Les services d'envoi, les listes de diffusion et la messagerie externalisée signent souvent avec leur propre domaine ; cela n'indique pas une usurpation de l'expéditeur."
+    },
+    "ARC_CHAIN_INVALID": {
+      "title": "La chaîne ARC ne se valide pas",
+      "shows": "Le message comporte %{instances} jeu(x) ARC et la chaîne ne se valide pas (%{reason}).",
+      "does_not_prove": "Un intermédiaire peut avoir rompu la chaîne, ou les clés des scelleurs n'ont pas été fournies ; cela n'indique pas une altération du message."
+    },
+    "RECEIVED_TIME_NOT_MONOTONIC": {
+      "title": "Les heures Received reculent",
+      "shows": "Le saut %{hop} est daté %{hop_date}, %{earlier_by_s} s avant le saut précédent %{previous_hop} (%{previous_date}), au-delà de l'écart d'horloge toléré (%{count} étape(s) de ce type).",
+      "does_not_prove": "Les horloges des serveurs sont parfois fausses et certains serveurs ajoutent les en-têtes Received dans le désordre ; cela n'indique pas qu'un en-tête a été inséré ou modifié."
+    },
+    "DATE_AFTER_FIRST_HOP": {
+      "title": "En-tête Date postérieur au premier serveur",
+      "shows": "L'en-tête Date (%{date}) est %{later_by_s} s plus tardif que l'heure à laquelle le premier serveur a reçu le message (%{first_hop_date}).",
+      "does_not_prove": "L'horloge de l'expéditeur peut être fausse ; cela n'indique pas que la date a été modifiée après l'envoi."
+    },
+    "MSG_TRANSPORT_HEADERS_MISSING": {
+      "title": "Message Outlook sans en-têtes de transport",
+      "shows": "Le fichier .msg n'a pas de propriété PR_TRANSPORT_MESSAGE_HEADERS : la section d'en-têtes d'origine (sauts Received, signatures DKIM, Authentication-Results) n'est pas disponible, DKIM n'a donc pas été tenté.",
+      "does_not_prove": "Les brouillons, les éléments envoyés et les messages enregistrés par certains outils n'ont jamais eu ces en-têtes ; cela n'indique pas qu'ils ont été supprimés."
+    },
+    "ATTACHMENT_DATE_AFTER_SENT": {
+      "title": "Pièce jointe datée après le message",
+      "shows": "La date de %{field} de la pièce jointe %{attachment} (%{attachment_date}) est postérieure à la date (Date) du message (%{date}).",
+      "does_not_prove": "Ces dates sont écrites par le client d'envoi et sont faciles à fausser ou à fixer librement ; cela n'indique pas que la pièce jointe a été remplacée."
+    },
+    "LOOKALIKE_DOMAIN": {
+      "title": "Domaine ressemblant à un domaine propre",
+      "shows": "Le domaine %{header} %{domain} (%{domain_unicode}) ressemble au domaine propre %{own_domain} (méthode : %{method}).",
+      "does_not_prove": "Des noms proches appartiennent aussi à des organisations légitimes sans lien ; cela n'indique pas une intention de tromper."
+    },
+    "REPLY_TO_DIFFERS": {
+      "title": "Les réponses partent vers une autre organisation",
+      "shows": "L'adresse %{header} %{address} ne partage pas son domaine organisationnel avec le domaine de l'expéditeur %{from_domain}.",
+      "does_not_prove": "Les centres d'assistance, listes de diffusion, envois en masse et la gestion des retours utilisent légitimement d'autres adresses ; cela n'indique pas un détournement des réponses."
+    },
+    "DISPLAY_NAME_SPOOF": {
+      "title": "Le nom affiché suggère un autre expéditeur",
+      "shows": "Le nom affiché « %{display_name} » de %{address} contient une autre adresse ou le nom de l'organisation propre alors que l'adresse est externe (%{reason}).",
+      "does_not_prove": "Les noms s'écrivent librement et les partenaires mentionnent l'organisation avec laquelle ils travaillent ; cela n'indique pas une usurpation."
+    },
+    "FILE_STRUCTURE_DAMAGED": {
+      "title": "Structure du fichier endommagée ou incomplète",
+      "shows": "La structure %{format} n'est pas complète ou pas bien formée (%{problems}) ; ce qui a pu être lu a été analysé.",
+      "does_not_prove": "Les copies tronquées, les exports interrompus et les logiciels non standard en sont aussi la cause ; cela n'indique pas un dommage volontaire."
+    },
+    "PARSER_FAILED": {
+      "title": "Analyse du message non terminée",
+      "shows": "L'analyse de ce message n'a pas abouti (motif : %{reason}, code de sortie %{exit_code}) ; ses constats de messagerie manquent.",
+      "does_not_prove": "Cela n'indique pas que le fichier est malveillant ou endommagé ; des limites de taille ou de temps et un contenu inhabituel arrêtent aussi une analyse."
+    },
+    "DKIM_NOT_SIGNED": {
+      "title": "Pas de signature DKIM",
+      "shows": "Le message ne comporte pas d'en-tête DKIM-Signature.",
+      "does_not_prove": "Beaucoup de serveurs légitimes ne signent pas et l'absence de signature est courante ; cela ne démontre rien sur l'authenticité, dans un sens ou dans l'autre."
+    },
+    "DKIM_SIGNATURE_NOT_EVALUATED": {
+      "title": "Signature DKIM non évaluée",
+      "shows": "La signature DKIM de %{d} (sélecteur %{s}) n'a pas pu être évaluée (%{reason}).",
+      "does_not_prove": "Une signature expirée, non prise en charge ou partielle (l=), ou un fichier .msg qui ne conserve pas le corps d'origine, ne peut pas être vérifiée ; cela ne dit rien du message."
+    },
+    "TIMEZONE_INCONSISTENT": {
+      "title": "Fuseau horaire incohérent",
+      "shows": "L'en-tête Date utilise le fuseau %{date_zone} alors que le premier serveur de l'organisation expéditrice a utilisé %{hop_zone} (%{reason}).",
+      "does_not_prove": "Clients et serveurs sont souvent réglés sur des fuseaux différents et les voyageurs gardent le leur ; cela n'indique pas une modification de la date."
+    },
+    "MESSAGE_ID_DOMAIN_MISMATCH": {
+      "title": "Message-ID d'un autre domaine",
+      "shows": "Le Message-ID a été généré sous %{message_id_domain}, et non sous le domaine de l'expéditeur %{from_domain}.",
+      "does_not_prove": "Les clients de messagerie, services d'envoi et webmails génèrent des Message-ID à leur propre nom ; cela n'indique pas que le message est falsifié."
+    },
+    "DKIM_KEY_NOT_AVAILABLE": {
+      "title": "Clé DKIM non disponible",
+      "shows": "Aucune clé publique pour %{name} n'a été fournie, la signature de %{d} (sélecteur %{s}) n'a donc pas pu être vérifiée (analyse hors ligne, sans requête DNS).",
+      "does_not_prove": "Cela ne dit rien de la signature ; fournissez la clé en vigueur lors de l'envoi pour la vérifier."
+    },
+    "PAYMENT_DETAILS_MENTIONED": {
+      "title": "Coordonnées de paiement mentionnées",
+      "shows": "L'objet ou le texte mentionne des coordonnées de paiement : %{terms}.",
+      "does_not_prove": "Factures et avis de paiement mentionnent sans cesse des coordonnées bancaires ; c'est un repère pour l'examen, pas un signe de fraude."
+    },
+    "DKIM_SIGNATURE_VALID": {
+      "title": "La signature DKIM se vérifie",
+      "shows": "La signature DKIM de %{d} (sélecteur %{s}, %{a}) se vérifie avec la clé issue de %{key_source} : les en-têtes signés et le corps n'ont pas changé depuis la signature.",
+      "does_not_prove": "Cela montre seulement que le détenteur de la clé privée de %{d} a signé ce contenu ; cela n'indique ni qui l'a rédigé, ni que l'expéditeur est véridique, ni que les en-têtes non signés sont d'origine."
+    },
+    "AUTH_RESULTS_RECORDED": {
+      "title": "Contrôles du serveur destinataire enregistrés",
+      "shows": "%{count} en-tête(s) Authentication-Results ; le premier, écrit par %{authserv_id}, déclare : %{results}.",
+      "does_not_prove": "Ce sont des affirmations écrites dans le message par un serveur ; toute personne ayant manipulé le fichier a pu les ajouter ou les modifier, et elles n'ont pas été revérifiées."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "La détection du type repose sur une table limitée de signatures courantes ; les types inconnus sont signalés comme inconnus, non comme suspects.",
     "TIMESTAMPS_FROM_FILESYSTEM": "Les dates de modification proviennent du système de fichiers de la copie examinée et peuvent différer de la source d'origine.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un résultat sans constatation ne prouve pas qu'un fichier est authentique ni qu'il n'a pas été modifié avant son acquisition.",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine."
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine.",
+    "DKIM_NEEDS_KEY_AT_SENDING_TIME": "Les résultats DKIM dépendent des clés publiques fournies : une vérification n'a de sens qu'avec la clé en vigueur lors de l'envoi. Les clés changent : une clé actuelle peut faire échouer un message authentique et une clé absente laisse la signature non vérifiée.",
+    "MISSING_SIGNATURE_PROVES_NOTHING": "L'absence de signature DKIM est courante et ne démontre rien ; une signature valide ne couvre que les en-têtes signés et le corps, pas l'auteur du message.",
+    "MSG_MAY_LACK_TRANSPORT_HEADERS": "Les fichiers .msg d'Outlook ne conservent pas le message d'origine : le corps est réencodé (DKIM ne peut donc pas être vérifié) et la section d'en-têtes d'origine n'est conservée que si les en-têtes de transport ont été enregistrés.",
+    "BEC_HEURISTICS_FALSE_POSITIVES": "Les contrôles de domaines ressemblants, Reply-To, nom affiché et termes de paiement sont des heuristiques avec faux positifs et faux négatifs ; le domaine organisationnel est déterminé avec la Public Suffix List fournie, dont la version figure dans environment.json et peut différer de celle en vigueur à la date du message.",
+    "HEADERS_ARE_CLAIMS": "Les en-têtes Received, Date et Authentication-Results sont du texte écrit par des serveurs et des clients ; les en-têtes non signés peuvent être ajoutés ou modifiés par quiconque a manipulé le fichier.",
+    "MBOX_ESCAPING_AMBIGUOUS": "Dans un mbox, les lignes du corps commençant par « From » sont échappées par « > » ; le déséchappement suit la variante choisie (mboxrd par défaut) et ne peut pas toujours restituer la ligne d'origine, ce qui peut affecter l'empreinte DKIM du corps."
   },
   "brand": {
     "descriptor": "INVESTIGATION NUMÉRIQUE | RÉPONSE AUX INCIDENTS | SÉCURITÉ",
@@ -225,6 +376,97 @@
     "case_dir": "Dossier de l'affaire",
     "case_dir_hint": "facultatif : dossier partagé de l'affaire (relie les outils d'une même affaire)",
     "out_from_case": "Dossier de sortie : fixé par le dossier de l'affaire",
-    "evidence_ids": "ID des éléments"
+    "evidence_ids": "ID des éléments",
+    "options": "5. Options",
+    "opt_dkim_keys": "Fichier de clés DKIM",
+    "opt_dkim_keys_hint": "clés publiques fournies par l'expert (selector._domainkey.domaine + TXT, ou fichier de zone)",
+    "opt_online": "Interroger les clés DNS d'aujourd'hui (preuve plus faible)",
+    "opt_online_note": "Seulement pour les clés absentes du fichier. Le DNS d'aujourd'hui peut ne plus contenir la clé utilisée à l'envoi du message (les clés tournent) ; chaque requête est inscrite au journal d'audit et signalée DKIM_KEY_FROM_CURRENT_DNS.",
+    "opt_own_domains": "Domaines propres",
+    "opt_own_domain_hint": "ex. example.org",
+    "opt_add": "Ajouter",
+    "opt_no_domains": "Aucun : les contrôles de domaine sosie et de nom affiché n'ont pas de domaine de référence.",
+    "opt_attachments": "Extraire les pièces jointes (attachments/ dans le dossier de chaque message)",
+    "opt_clock_skew": "Décalage d'horloge toléré (s)",
+    "opt_mbox_variant": "Variante mbox",
+    "opt_item_reports": "Rapports par élément",
+    "opt_reports_all": "Tous les éléments",
+    "opt_reports_flagged": "Éléments signalés seulement",
+    "opt_worker": "Limites du processus d'analyse (avancé)",
+    "opt_worker_note": "Chaque message est analysé dans son propre processus isolé.",
+    "opt_timeout": "Délai maximal par message (s)",
+    "opt_memory": "Mémoire par processus (Mo)",
+    "opt_max_message": "Plus grand message analysé (Mio)",
+    "opt_max_mbox": "Messages analysés par mbox",
+    "results": "Résultats",
+    "col_file": "Fichier / message",
+    "col_type": "Type",
+    "col_status": "État",
+    "col_findings": "Constats (É / M / F / I)",
+    "status_ok": "ok",
+    "status_attention": "attention",
+    "status_problem": "problème",
+    "open_message": "Ouvrir",
+    "results_unreadable": "L'exécution n'a pas pu être relue depuis son journal d'audit",
+    "message_refused": "Message non affiché",
+    "viewer_title": "Visionneuse de messages",
+    "back": "Retour aux résultats",
+    "digest_ok": "headers.json et dkim.json correspondent aux empreintes du journal d'audit",
+    "review_logged": "Ouverture inscrite au journal de revue de l'exécution",
+    "review_log_failed": "Journal de revue non écrit :",
+    "sec_addresses": "Adresses",
+    "addr_from": "De (From)",
+    "addr_sender": "Expéditeur (Sender)",
+    "addr_reply_to": "Répondre à (Reply-To)",
+    "addr_return_path": "Return-Path",
+    "addr_mismatch": "autre domaine organisationnel que From",
+    "sec_hops": "Sauts Received (saut 1 = le plus proche de l'expéditeur)",
+    "hop": "Saut",
+    "hop_route": "from -> by",
+    "col_date_utc": "Date (UTC)",
+    "col_zone": "Fuseau",
+    "col_delta": "Depuis le précédent",
+    "hop_out_of_order": "hors ordre",
+    "hop_gap": "écart",
+    "hop_undated": "sans date",
+    "date_header": "En-tête Date",
+    "date_to_first_hop": "premier saut",
+    "no_hops": "Aucun en-tête Received.",
+    "sec_dkim": "DKIM / ARC",
+    "col_algorithm": "Algorithme",
+    "col_result": "Résultat",
+    "col_key_source": "Origine de la clé",
+    "col_aligned": "Aligné sur From",
+    "key_file": "fichier de clés",
+    "key_dns": "DNS actuel",
+    "key_none": "aucune",
+    "line": "ligne",
+    "dkim_mode": "Mode",
+    "dkim_not_evaluated": "Non évalué",
+    "dkim_no_signature": "Aucun en-tête DKIM-Signature.",
+    "arc": "ARC",
+    "yes": "oui",
+    "no": "non",
+    "sec_headers": "Tableau des en-têtes",
+    "hdr_message_id": "Message-ID",
+    "hdr_subject": "Objet",
+    "hdr_date": "Date (telle qu'écrite)",
+    "hdr_date_utc": "Date (UTC)",
+    "hdr_recipients": "À / Cc",
+    "hdr_counts": "Structure",
+    "hdr_message": "Octets du message",
+    "hdr_structure": "Problèmes MIME",
+    "hdr_auth_results": "Authentication-Results (déclaré)",
+    "hdr_msg_transport": "En-têtes de transport Outlook",
+    "hdr_msg_submit": "Heure d'envoi Outlook",
+    "sec_attachments": "Pièces jointes",
+    "col_name": "Nom",
+    "col_size": "Taille (o)",
+    "no_attachments": "Aucune pièce jointe.",
+    "not_listed": "non listés",
+    "item_findings": "Constats",
+    "shows": "Montre",
+    "not_proves": "Ne prouve pas",
+    "no_findings": "Aucun constat."
   }
 }

@@ -1,0 +1,28 @@
+Return-Path: <bruno@example.org>
+Received: from smtp.example.org (smtp.example.org [192.0.2.25]) by mx.acme.example with ESMTPS id 4F2A1; Wed, 11 Nov 2026 08:00:03 +0000
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org;
+ i=@example.org; q=dns/txt; s=s2026; t=1794437779; h=from : to :
+ subject : date : message-id : reply-to : mime-version : content-type :
+ content-transfer-encoding : from;
+ bh=gQujZM64/sHO+TANKlWKQ44yV5md2Zt9laVnONuIQrs=;
+ b=boSa3H5eCm83Bni/2j/Rz2oLJy59lj+IZXjZadxiQ7gfXm6rTrNt4TMDofoi0FCRdf7jY
+ NEKW8nk4R2OA70TQSVDMEVJaaja8SKf/B3H88maKp3Qc/Bnrkru8/DWLhuET6WPEsVTSL9D
+ MVRqvqsg3wECeNlVtN7ITb7NTeH9hPZe8QOodbprQ1hc5zY42muDH7phRENI1mhUEobCz0R
+ z4jvFrR0Hnk8v+tbaPXs0d4BJrvaHjKs1ljkxdNheq82wV1qcPm+CoRK1cAnut1byVbtbuM
+ ppVARSSpx76jgm7dbfivSFXdhqoRSKiPIuHWNmCOqyv40p9rs6y84lu7yuXQ==
+Received: from [192.0.2.10] (laptop.example.org) by smtp.example.org with ESMTPSA id 77B1 for <ana@acme.example>; Wed, 11 Nov 2026 09:00:00 +0100
+From: Bruno Proveedor <bruno@example.org>
+To: Ana Compras <ana@acme.example>
+Subject: Cambio de contacto
+Date: Wed, 11 Nov 2026 09:00:00 +0100
+Message-ID: <20261111090000.7@example.org>
+Reply-To: Bruno <bruno.proveedor@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Ana,
+
+por favor responde a mi nueva dirección.
+
+Bruno

@@ -10,17 +10,27 @@
 
 pub mod analyzer;
 pub mod audit;
+pub mod bec;
 pub mod case;
+pub mod dkim;
+pub mod dnsfetch;
 pub mod env;
 pub mod events;
 pub mod hash;
 pub mod i18n;
 pub mod input;
+pub mod mail;
+pub mod mbox;
+pub mod model;
+pub mod msg;
+pub mod psl;
 pub mod report;
+pub mod review;
 pub mod run;
 pub mod time;
 pub mod trust;
 pub mod verify;
+pub mod worker;
 
 pub use case::CaseRole;
 pub use events::Event;

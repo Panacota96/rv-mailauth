@@ -9,7 +9,13 @@ that the record was not altered.
 | `audit.jsonl` | One JSON object per action, hash-chained (authoritative) |
 | `audit.log` | The same actions as readable text (convenience copy) |
 | `hashes.csv` | Hash register: `index,path,size,<algo1>[,<algo2>],status,error` |
-| `environment.json` | Tool version, compiler, target, every dependency version, OS, host, OS user, working folder, command line |
+| `environment.json` | Tool version, compiler, target, every dependency version (incl. mail-parser, mail-auth), the Public Suffix List version and SHA-256, OS, host, OS user, working folder, command line |
+| `timestamp-<N>.tsr` / `.json` | RFC 3161 token for the chain head and its summary |
+| `review.jsonl` | Written later by the GUI message viewer: one hash-chained entry per message opened (`ui_message_viewed`) or refused (`ui_message_refused`), the first entry linked to this run's `run_finished` |
+
+`rv-mailauth keys import` writes a log folder of its own (`keys_import_started`, `key_imported`, `record_ignored`,
+`output_written`, `keys_import_finished`), so the provenance of a key file — the SHA-256 of every archive it came
+from and of the file written — is a chained record too.
 
 ## The hash chain
 
@@ -135,17 +141,25 @@ physical transfers. This is a working aid, not legal advice: check it against th
 | Action | When | Key details |
 | --- | --- | --- |
 | `run_started` | first | tool, version, frontend, algorithms, langs, inputs, case |
-| `ui_*` | GUI only, before the run | input added/removed, hash selection, language, recursive, start clicked |
+| `ui_*` | GUI only, before the run | every setting changed (inputs, hashes, languages, case folder, trust, email options), `ui_start_clicked` with the final settings ([usage-gui.md](usage-gui.md#what-the-gui-records)) |
+| `case_linked`, `case_algorithm_added` | case folder | the case-log entry this run starts from; an algorithm added to match the registry |
 | `environment_recorded` | | digests of `environment.json` |
+| `analysis_configured` | | DKIM mode (offline/online), key file path, SHA-256, key count and names, own domains, clock skew, mbox variant, size and worker limits, isolation requested and applied, worker executable, item-report mode, Public Suffix List version and SHA-256 |
 | `inputs_resolved` | | number of items and bytes |
-| `item_started` | each item | index, size, modified time |
-| `item_hashed` | each item | digests, bytes read, `mtime_unchanged` |
+| `item_started`, `item_hashed` | each file | index, size, modified time; digests, bytes read, `mtime_unchanged` |
+| `evidence_verified_against_case` / `evidence_not_in_case_registry` | case folder, each file | match, matched by (id, path, content), expected and actual digests |
+| `analysis_started` | each file or message | index, message number, isolation applied |
+| `message_started`, `message_hashed` | each mbox message | mbox, `n`, offsets, length, the `From ` line; digests of the message bytes re-read from the mbox |
+| `dkim_key_fetched`, `analysis_repeated` | `--online` only | key name, found, TXT SHA-256, error, elapsed; the item analysed again with the fetched keys |
+| `output_written` (`output_missing`) | each file the analysis wrote | relative path, kind (`headers`, `dkim`, `attachment`, `mbox_index`, `partial_output`, `unlisted_output`), bytes, digests |
 | `item_error` | unreadable item | error message |
-| `item_analyzed` | each item | detected type, extension, findings, status |
+| `item_analyzed` | each file or message | detected type, findings, status, analysis summary: message bytes and SHA-256, Message-ID, hop and attachment counts, every DKIM result with its key source, ARC result, mbox message count, and `worker` (elapsed, exit code, network isolation) |
 | `item_cancelled` / `run_cancelled` | on cancel | processed count |
 | `duplicate_group` | after the loop | hash, item indexes |
 | `hash_register_written` | | digests of `hashes.csv` |
-| `item_reports_written` | each item | digests of every report file |
+| `item_reports_written` / `item_reports_skipped` | each item | digests of every report file / `--item-reports flagged` skip |
+| `signing_certificate_loaded` | `--sign-cert` | certificate subject and SHA-256 (never the password) |
+| `timestamp_obtained` / `timestamp_pending` | before the statistics report | covered entry, head, TSA, genTime, token SHA-256 / the reason |
 | `statistics_report_written` | | digests of statistics files |
 | `run_finished` / `run_failed` | last | totals, severities, elapsed |
 
@@ -155,6 +169,7 @@ physical transfers. This is a working aid, not legal advice: check it against th
 flowchart LR
     O[("Original media")] -->|write blocker + imaging tool| C[("Verified working copy")]
     C -->|read-only open| T["RV MailAuth"]
+    K[("DKIM key archive")] -->|keys import, audited| T
     T --> L["logs/"]
     T --> R["reports/"]
     L & R --> K["Case file<br/>(keep together)"]
@@ -163,6 +178,11 @@ flowchart LR
 - Files are opened with read-only access; modification times are compared before and after hashing
   (`mtime_unchanged` in `item_hashed`).
 - Symbolic links are never followed (no escape outside the selected folders).
+- Each message is parsed by a worker process that receives the file path read-only and writes only into its item
+  folder; the parent records every file it wrote. An mbox is never rewritten or split into files: its messages are
+  read in place at their offsets.
+- DKIM keys come from the examiner's key file (its SHA-256 is recorded); no DNS query is made unless `--online` is
+  given, and each one is recorded.
 - The tool does not replace imaging tools or write blockers: run it on a verified copy.
 
 ## Mapping to ISO/IEC 27037:2012
@@ -170,8 +190,8 @@ flowchart LR
 | 27037 principle / activity | How RV MailAuth supports it |
 | --- | --- |
 | Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash; `verify-log` checks the chain and its end against the timestamp and the case log |
-| Repeatability (5.3.3) | `environment.json` records exact tool and dependency versions; same input → same hashes |
-| Reproducibility (5.3.4) | Independent verifier (`tests/verify_chain.py`), standard algorithms, and a second implementation of the tool (the other profile) that numbers, hashes and verifies identically |
+| Repeatability (5.3.3) | `environment.json` records exact tool and dependency versions; same input, key file and options → same hashes and findings |
+| Reproducibility (5.3.4) | Independent verifiers (`tests/verify_chain.py`, dkimpy for DKIM), standard algorithms (RFC 6376), the key file disclosed with its digest |
 | Justifiability (5.3.5) | Every finding states what it shows and what it does **not** prove; limitations in every report |
 | Preservation (7.1.4) | Read-only access; hashes of every file and of every report produced |
 | Documentation / chain of custody | Hash register, reports, and log folder form the record of the examination |

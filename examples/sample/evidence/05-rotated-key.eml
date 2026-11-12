@@ -1,0 +1,27 @@
+Return-Path: <bruno@example.org>
+Received: from smtp.example.org (smtp.example.org [192.0.2.25]) by mx.acme.example with ESMTPS id 4F2A1; Mon, 12 Oct 2026 14:00:03 +0000
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org;
+ i=@example.org; q=dns/txt; s=s2025; t=1794437779; h=from : to :
+ subject : date : message-id : mime-version : content-type :
+ content-transfer-encoding : from;
+ bh=lyXiIr+Ip0VBK7HaWRKLM98c2cmX5b1fXdi0W9hkd4U=;
+ b=VYmmrrBNYqLBXuoqwYF/T5TKO2UFlSLl+bjstODBiLGEtQnRHmZ06QIJxOTUcWHjglZdC
+ I0GBYsewUXRgknGd1lx8C5feHfo8LMiHFmGOiWJCMpzfZOT4puwLwGR/c0xWTpTe7qxRpEC
+ 8Sly6hBNHYMKPyxyInVH708v/PhrumxJxCYOWFV27Ut87LjrCF0oA6XF25M/RmCZRo9ddDT
+ 7nU0grA2hsX99RJqFAXaq4afKqQ2/g5efFi93M39G3alRNdfnBnBpbzwdLHndBtxGsPoDlN
+ pNDV1mrN61q42QDJ5uSG3ZU9sKWs8AyuZHn3H1PSgLTj8wCk88pR6RMHknbQ==
+Received: from [192.0.2.10] (laptop.example.org) by smtp.example.org with ESMTPSA id 77B1 for <ana@acme.example>; Mon, 12 Oct 2026 16:00:00 +0200
+From: Bruno Proveedor <bruno@example.org>
+To: Ana Compras <ana@acme.example>
+Subject: Calendario de entregas
+Date: Mon, 12 Oct 2026 16:00:00 +0200
+Message-ID: <20261012160000.5@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Ana,
+
+te envío el calendario de entregas de octubre.
+
+Bruno

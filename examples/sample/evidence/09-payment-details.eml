@@ -1,0 +1,30 @@
+Return-Path: <bruno@example.org>
+Received: from smtp.example.org (smtp.example.org [192.0.2.25]) by mx.acme.example with ESMTPS id 4F2A1; Wed, 11 Nov 2026 10:00:02 +0000
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org;
+ i=@example.org; q=dns/txt; s=s2026; t=1794437779; h=from : to :
+ subject : date : message-id : mime-version : content-type :
+ content-transfer-encoding : from;
+ bh=2948cjUhZtVFdSrIRWeUFlHmDBgYRrakRNoEXnA/i98=;
+ b=L7nT+UL6LVfwaggpj5hZKYAr/i2W3iGCV/rQLG9YfOJKpaAuFvuQ339kb5j+sooUOMgbf
+ JCFBIU8CPY0eSCGGE1pK/NF3eoq93J3Jt/jom4CnPJoeZtnEttjEK4Fp8NnN5AOEz1YWG1a
+ 16/da9MxHAqSa+eA0G+LD0oWJc1IXz8WgZQ14RlXwW691yzyl44ZaP9OyfTFQbra3kQWgnc
+ RYPBtcl+/gOF5nKDfgnQ+lSEc9fjL66ip201Jlp4tTupkBghC9CUoLqW4MHbMRbfP/BWSMe
+ jg6kKobCDZrX3KNKCJW79PM4XKbC3RJoJzi7EhJ578DxcP5K58JZWqSeGWvg==
+Received: from [192.0.2.10] (laptop.example.org) by smtp.example.org with ESMTPSA id 77B1 for <ana@acme.example>; Wed, 11 Nov 2026 11:00:00 +0100
+From: Bruno Proveedor <bruno@example.org>
+To: Ana Compras <ana@acme.example>
+Subject: Updated payment information
+Date: Wed, 11 Nov 2026 11:00:00 +0100
+Message-ID: <20261111110000.9@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Dear Ana,
+
+please note that our bank details have changed.
+New IBAN: DE89 3704 0044 0532 0130 00
+
+Nuevos datos bancarios / nouvelles coordonnées bancaires ci-dessus.
+
+Bruno

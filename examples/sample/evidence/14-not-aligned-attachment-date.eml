@@ -1,0 +1,31 @@
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+ d=mailer.example.com; i=@mailer.example.com; q=dns/txt; s=m1;
+ t=1794437788; h=from : to : subject : date : message-id : mime-version
+ : content-type : from;
+ bh=xvivSx+3jruISGldQxgxuVzCGb4OJqZAtb4NE+Y8DlE=;
+ b=S6EYrkTByCsab6DV+DX+ppHe+n0c/7j0FVb/HsZXdkq2uihOScBqPTiiDbhFLVdyNYPld
+ T/Vkq34OvFrwVXiHFqhAEKzrQcGU5EGVIg7ipWb0uM/Pnp4VqET6DVi3UEhlQnBDrEteaav
+ 9Jl4jA+E9822EgVQ6wDV4UNFqbm12py1wI9ZOdUJ3MayU7+ZKAV0EV/DZ0sYnFTuJ3dkNqg
+ 2qpEGFugX2MNQUnEexsZ5LZHfV7c359DzGiwlKW3fBxYlkCKtMr4tqeEnRH4/L5mJpYM0nX
+ w3gTUDEEOofFlL6hY6mDwLpR13sBxMPcfFlOD0xLi15Nl7mngWnlZhu7GvEg==
+Received: from out.mailer.example.com ([203.0.113.50]) by mx.acme.example with ESMTPS id 8A; Thu, 12 Nov 2026 14:00:05 +0000
+Received: from api.mailer.example.com by out.mailer.example.com with ESMTP id 8B; Thu, 12 Nov 2026 14:00:01 +0000
+From: Bruno Proveedor <bruno@example.org>
+To: Ana Compras <ana@acme.example>
+Subject: Informe semanal
+Date: Thu, 12 Nov 2026 15:00:00 +0100
+Message-ID: <20261112150000.15@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b14"
+
+--b14
+Content-Type: text/plain; charset=utf-8
+
+Informe adjunto.
+--b14
+Content-Type: text/csv; name="informe.csv"
+Content-Disposition: attachment; filename="informe.csv"; modification-date="Fri, 13 Nov 2026 09:00:00 +0000"
+Content-Transfer-Encoding: base64
+
+RmVjaGE7SW1wb3J0ZQoyMDI2LTExLTEyOzEwMAo=
+--b14--

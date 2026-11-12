@@ -8,3 +8,9 @@ Third-party components below keep their own licences.
 It includes third-party open-source components; their names and exact versions are
 listed in the SBOM published with every release (sbom.cdx.json) and in each run's
 logs/<RUN-ID>/environment.json.
+
+Bundled data:
+
+- Public Suffix List (src/core/data/public_suffix_list.dat), https://publicsuffix.org/, Mozilla Public
+  License 2.0 (https://mozilla.org/MPL/2.0/). Included unmodified; its version and SHA-256 are recorded in
+  src/core/data/PSL_VERSION.txt, in every run's environment.json and in the audit log.

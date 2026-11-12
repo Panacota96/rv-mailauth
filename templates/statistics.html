@@ -57,8 +57,9 @@
 </div>
 {% endif %}
 <h2>{{ t.items }}</h2>
+{% if item_reports_flagged_only %}<p class="note">{{ t.flagged_only_note }}</p>{% endif %}
 <table><tr><th>#</th>{% if case %}<th>{{ t.evidence_id }}</th>{% endif %}<th>{{ t.file }}</th><th>{{ t.size }}</th><th>{{ t.status }}</th><th>{{ t.findings }}</th></tr>
-{% for it in item_rows %}<tr><td>{{ it.index }}</td>{% if case %}<td class="mono">{{ it.evidence_id or "—" }}</td>{% endif %}<td><a href="{{ it.link }}">{{ it.file_name }}</a></td><td>{{ it.size }}</td><td>{{ it.status_label }}</td><td>{{ it.finding_count }}</td></tr>{% endfor %}
+{% for it in item_rows %}<tr><td>{{ it.index }}</td>{% if case %}<td class="mono">{{ it.evidence_id or "—" }}</td>{% endif %}<td>{% if it.link %}<a href="{{ it.link }}">{{ it.file_name }}</a>{% else %}{{ it.file_name }} <em>({{ t.item_report_not_written }})</em>{% endif %}</td><td>{{ it.size }}</td><td>{{ it.status_label }}</td><td>{{ it.finding_count }}</td></tr>{% endfor %}
 </table>
 
 <h2>{{ t.limitations }}</h2>

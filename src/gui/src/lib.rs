@@ -3,3 +3,4 @@
 pub mod app;
 pub mod launch;
 pub mod state;
+pub mod viewer;

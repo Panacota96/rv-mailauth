@@ -58,7 +58,7 @@ flowchart LR
 4. After ~15–20 minutes the release has: `rv-mailauth-X.Y.Z-windows-x64.zip`, `rv-mailauth-X.Y.Z-windows-x64-setup.exe`,
    `SHA256SUMS`, `sbom.cdx.json`; the provenance attestation is stored by GitHub.
 5. Smoke-test on Windows 10 and 11 (checklist in [development.md](development.md)): verify the hashes, install,
-   `rv-mailauth self-test`, a sample inventory, open the GUI, uninstall.
+   `rv-mailauth self-test`, the sample analysis with `examples/sample/dkim-keys.txt`, open the GUI and a message in the viewer, uninstall.
 
 ### Test package without a release
 

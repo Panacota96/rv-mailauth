@@ -5,12 +5,13 @@
 //! `<CASE>/runs/<tool>/<RUN-ID>/`, the case log records run_started / run_finished, and depending on
 //! [`CaseRole`] every item is registered (intake) or verified against the registry (analysis).
 
-use crate::analyzer::{Finding, Severity, analyze};
+use crate::analyzer::{AnalyzeCtx, Finding, Severity, analyze_item};
 use crate::audit::AuditLog;
 use crate::case::{self, Case, CaseRole, Comparison, Registration, Writer};
 use crate::events::{Event, eta_ms};
 use crate::hash::{HashAlgo, hash_bytes, hash_reader, validate_selection};
 use crate::input::collect;
+use crate::model::{DomainOptions, KeyRecord, MboxMessageRef};
 use crate::report::{self, AuditRef, CaseInfo, CaseTally, ItemResult, RunInfo, RunTotals};
 use crate::time::{utc_compact, utc_from, utc_now};
 use serde_json::{Value, json};
@@ -51,6 +52,9 @@ pub struct RunConfig {
     pub evidence_ids: Vec<String>,
     /// Intake (registers evidence) or analysis (verifies against the registry). Default: [`crate::CASE_ROLE`].
     pub case_role: CaseRole,
+    /// Email analysis options (DKIM key file, online DNS mode, own domains, attachment extraction, worker
+    /// limits and isolation). The CLI flags and GUI settings map 1:1 onto these fields.
+    pub domain: crate::model::DomainOptions,
 }
 
 impl Default for RunConfig {
@@ -76,6 +80,7 @@ impl Default for RunConfig {
             case_dir: None,
             evidence_ids: vec![],
             case_role: crate::CASE_ROLE,
+            domain: crate::model::DomainOptions::default(),
         }
     }
 }
@@ -353,16 +358,20 @@ fn pipeline(
         log.record(action, None, details.clone()).map_err(io)?;
     }
 
-    let env_json = report::pretty(&crate::env::describe(
+    let mut env = crate::env::describe(
         &cfg.tool_name,
         &cfg.tool_version,
         &cfg.frontend,
         &cfg.command_line,
-    ));
+    );
+    // Bundled data the results depend on (version and digest).
+    env["data_files"] = json!({"public_suffix_list": crate::psl::describe()});
+    let env_json = report::pretty(&env);
     let (_, env_digest) =
         report::write_hashed(&log_dir, "environment.json", &env_json, &cfg.algorithms)?;
     log.record("environment_recorded", Some("environment.json"), env_digest)
         .map_err(io)?;
+    record_analysis_options(&cfg.domain, &mut log).map_err(io)?;
     let signer = match &cfg.sign_cert {
         None => None,
         Some(p) => {
@@ -420,6 +429,8 @@ fn pipeline(
     let mut errors = 0u64;
     let mut cancelled = false;
     let mut last_progress = Instant::now() - PROGRESS_EVERY;
+    // Online mode: keys fetched from DNS during this run (name → record, None = not found), one fetch per name.
+    let mut dns_keys: BTreeMap<String, Option<KeyRecord>> = BTreeMap::new();
 
     for item in &items {
         if cancel.load(Ordering::Relaxed) {
@@ -467,7 +478,7 @@ fn pipeline(
             index: item.index,
             path: item.path.clone(),
             size: item.size,
-            modified_utc,
+            modified_utc: modified_utc.clone(),
             hashes: vec![],
             detected_type: None,
             extension: None,
@@ -478,7 +489,12 @@ fn pipeline(
             evidence_id: None,
             case_status: None,
             intake_utc: None,
+            details: Value::Null,
+            outputs: vec![],
+            message: None,
         };
+        let mut head = Vec::new();
+        let mut mbox_refs: Vec<MboxMessageRef> = Vec::new();
         match outcome {
             Ok(None) => {
                 log.record(
@@ -506,15 +522,31 @@ fn pipeline(
                     path: path_s.clone(),
                     hashes,
                 });
-                let a = analyze(&result.file_name(), out.bytes, &out.head);
                 result.size = out.bytes;
-                result.hashes = out.digests;
-                result.detected_type = a.detected_type;
-                result.extension = a.extension;
-                result.findings = a.findings;
+                result.hashes = out.digests.clone();
+                // Case folder: the item is compared with the registry BEFORE it is analysed, so the audit
+                // shows the continuity check first (a mismatch is a finding; the analysis still runs).
                 if let Some(l) = link.as_deref_mut() {
                     case_check_item(l, cfg.case_role, &mut result, &mut log, sink)?;
                 }
+                // Second, read-only pass by the domain analysis (whole message, in a worker per message):
+                // justified because DKIM and MIME need the whole message. Logged as analysis_started.
+                let a = analyze_recorded(
+                    cfg,
+                    &mut log,
+                    &mut dns_keys,
+                    &report_dir,
+                    &mut result,
+                    &out.head,
+                    &item.path,
+                    None,
+                )?;
+                result.detected_type = a.detected_type.clone();
+                result.extension = a.extension.clone();
+                result.findings.extend(a.findings.clone());
+                result.details = a.details.clone();
+                mbox_refs = crate::analyzer::mbox_messages(&a);
+                head = out.head;
             }
             Err(e) => {
                 errors += 1;
@@ -535,13 +567,32 @@ fn pipeline(
             }
         }
         let codes: Vec<String> = result.findings.iter().map(|f| f.code.clone()).collect();
-        result.audit_last_seq = log.record("item_analyzed", Some(&path_s), json!({"index": item.index, "detected_type": result.detected_type, "extension": result.extension, "findings": result.findings, "status": result.status()})).map_err(io)?;
+        result.audit_last_seq = log.record("item_analyzed", Some(&path_s), json!({"index": item.index, "detected_type": result.detected_type, "extension": result.extension, "findings": result.findings, "status": result.status(), "analysis": crate::analyzer::audit_summary(&result.details)})).map_err(io)?;
         sink(&Event::ItemFinished {
             index: item.index,
             path: path_s,
             status: result.status().into(),
             findings: codes,
         });
+        // An mbox: every message is an item of its own (own folder, digests, findings, audit entries).
+        let mut messages = Vec::new();
+        for m in std::mem::take(&mut mbox_refs) {
+            if cancel.load(Ordering::Relaxed) {
+                cancelled = true;
+                break;
+            }
+            let r = message_item(
+                cfg,
+                &mut log,
+                &mut dns_keys,
+                &report_dir,
+                &result,
+                &head,
+                &m,
+                sink,
+            )?;
+            messages.push(r);
+        }
         bytes_before += item.size;
         let elapsed = started.elapsed().as_millis() as u64;
         sink(&Event::Progress {
@@ -553,6 +604,10 @@ fn pipeline(
             eta_ms: eta_ms(elapsed, bytes_before, total_bytes),
         });
         results.push(result);
+        results.extend(messages);
+        if cancelled {
+            break;
+        }
     }
     if cancelled {
         log.record(
@@ -648,6 +703,7 @@ fn pipeline(
         signer,
         timestamp: json!({"status": "off"}),
         case: link.as_deref().map(|l| l.info(cfg.case_role)),
+        item_reports_flagged_only: cfg.domain.item_reports_flagged_only,
     };
     let log_dir_s = log_dir.display().to_string();
     for r in &results {
@@ -657,6 +713,17 @@ fn pipeline(
             log_dir: log_dir_s.clone(),
         };
         let dir = report_dir.join("items").join(r.folder());
+        // `--item-reports flagged`: no report files for items without findings above info (still listed in
+        // the statistics report; the skip is audited).
+        if !info.item_reports_written(r) {
+            log.record(
+                "item_reports_skipped",
+                Some(&r.path.display().to_string()),
+                json!({"folder": format!("items/{}", r.folder()), "status": r.status(), "reason": "item_reports_flagged_only"}),
+            )
+            .map_err(io)?;
+            continue;
+        }
         let files = report::write_item_reports(&dir, &info, r, &audit)?;
         log.record(
             "item_reports_written",
@@ -752,6 +819,275 @@ fn pipeline(
         audit_head: log.head().to_string(),
         ..summary
     })
+}
+
+fn isolation_name(i: &crate::model::Isolation) -> &'static str {
+    match i {
+        crate::model::Isolation::InProcess => "in_process",
+        crate::model::Isolation::Subprocess { .. } => "worker_process",
+        crate::model::Isolation::Worker => "worker_process_of_frontend",
+    }
+}
+
+/// `analysis_configured`: the email-analysis options of the run, and the examiner's DKIM key file (path,
+/// SHA-256, keys usable, problems) — so the record shows which keys every DKIM result depends on.
+fn record_analysis_options(d: &DomainOptions, log: &mut AuditLog) -> std::io::Result<()> {
+    let key_file = d.dkim_keys.as_ref().map(|p| {
+        match crate::dkim::load_key_file(p) {
+            Ok((keys, problems, sha)) => json!({"path": p.display().to_string(), "sha256": sha, "keys": keys.len(),
+                "names": crate::report::capped_list(&keys.iter().map(|k| k.name.clone()).collect::<Vec<_>>(), 20),
+                "problems": problems.into_iter().take(20).collect::<Vec<_>>()}),
+            Err(e) => json!({"path": p.display().to_string(), "error": e}),
+        }
+    });
+    log.record(
+        "analysis_configured",
+        None,
+        json!({
+            "dkim_mode": if d.online_dns { "online" } else { "offline" },
+            "public_suffix_list": crate::psl::describe(),
+            "dkim_key_file": key_file, "own_domains": d.own_domains,
+            "extract_attachments": d.extract_attachments, "clock_skew_s": d.clock_skew_s,
+            "mbox_variant": d.mbox_variant, "max_message_bytes": d.max_message_bytes,
+            "max_mbox_messages": d.max_mbox_messages, "worker_timeout_s": d.worker_timeout_s,
+            "worker_memory_mb": d.worker_memory_mb,
+            "item_reports": if d.item_reports_flagged_only { "flagged" } else { "all" },
+            "isolation_requested": isolation_name(&d.isolation),
+            "isolation": isolation_name(&crate::worker::resolve(&d.isolation)),
+            "worker_exe": match crate::worker::resolve(&d.isolation) { crate::model::Isolation::Subprocess { exe } => Some(exe.display().to_string()), _ => None },
+        }),
+    )?;
+    Ok(())
+}
+
+/// Runs the domain analysis of one item (an evidence file, or one message of an mbox when `message` is set),
+/// records `analysis_started`, the online DNS fetches (`dkim_key_fetched`, then `analysis_repeated`), and
+/// hashes every file the analysis wrote (`output_written`) into `result.outputs`.
+#[allow(clippy::too_many_arguments)]
+fn analyze_recorded(
+    cfg: &RunConfig,
+    log: &mut AuditLog,
+    dns_keys: &mut BTreeMap<String, Option<KeyRecord>>,
+    report_dir: &Path,
+    result: &mut ItemResult,
+    head: &[u8],
+    evidence: &Path,
+    message: Option<&MboxMessageRef>,
+) -> Result<crate::analyzer::Analysis, String> {
+    let io = |e: std::io::Error| format!("audit log write failed: {}", e);
+    let path_s = result.path.display().to_string();
+    let item_dir = report_dir.join("items").join(result.folder());
+    std::fs::create_dir_all(&item_dir).map_err(io)?;
+    let isolation = isolation_name(&crate::worker::resolve(&cfg.domain.isolation));
+    log.record(
+        "analysis_started",
+        Some(&path_s),
+        json!({"index": result.index, "message": message.map(|m| m.n), "isolation": isolation}),
+    )
+    .map_err(io)?;
+    let file_name = evidence
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let size = std::fs::metadata(evidence).map(|m| m.len()).unwrap_or(0);
+    let mut opts = cfg.domain.clone();
+    let analyse = |opts: &DomainOptions| {
+        analyze_item(&AnalyzeCtx {
+            path: evidence,
+            file_name: &file_name,
+            size,
+            head,
+            item_dir: &item_dir,
+            opts,
+            message,
+        })
+    };
+    let mut a = analyse(&opts);
+    if cfg.domain.online_dns {
+        let missing = crate::analyzer::missing_dns_keys(&a);
+        for name in &missing {
+            if dns_keys.contains_key(name) {
+                continue;
+            }
+            let f = crate::dnsfetch::fetch_key(name);
+            let rec = f.record();
+            log.record(
+                "dkim_key_fetched",
+                Some(&path_s),
+                json!({"name": name, "source": "current_dns", "found": rec.is_some(),
+                       "txt_sha256": rec.as_ref().map(|r| hash_bytes(r.txt.as_bytes(), HashAlgo::Sha256)),
+                       "error": f.txt.as_ref().err(), "elapsed_ms": f.elapsed_ms}),
+            )
+            .map_err(io)?;
+            dns_keys.insert(name.clone(), rec);
+        }
+        let usable: Vec<&String> = missing
+            .iter()
+            .filter(|n| dns_keys.get(*n).is_some_and(Option::is_some))
+            .collect();
+        if !usable.is_empty() {
+            // Only this message's keys: the batch-wide cache stays in the parent. Passing all of it would grow
+            // the worker's --opts argument with every domain seen and hit the OS command-line limit.
+            opts.fetched_keys = keys_for_message(&missing, dns_keys);
+            log.record(
+                "analysis_repeated",
+                Some(&path_s),
+                json!({"index": result.index, "message": message.map(|m| m.n), "reason": "keys_from_current_dns", "names": usable}),
+            )
+            .map_err(io)?;
+            a = analyse(&opts);
+        }
+    }
+    for o in &a.outputs {
+        let p = item_dir.join(&o.rel_path);
+        let digests =
+            std::fs::File::open(&p).and_then(|f| hash_reader(f, &cfg.algorithms, &mut |_| true));
+        match digests {
+            Ok(Some(d)) => {
+                let hashes: BTreeMap<String, String> = d
+                    .digests
+                    .iter()
+                    .map(|(a, h)| (a.name().to_string(), h.clone()))
+                    .collect();
+                log.record("output_written", Some(&path_s), json!({"index": result.index, "kind": o.kind, "file": format!("items/{}/{}", result.folder(), o.rel_path), "bytes": d.bytes, "hashes": hashes})).map_err(io)?;
+                result.outputs.push(crate::report::OutputRecord {
+                    rel_path: o.rel_path.clone(),
+                    kind: o.kind.clone(),
+                    bytes: d.bytes,
+                    hashes,
+                });
+            }
+            Ok(None) => {}
+            Err(e) => {
+                log.record("output_missing", Some(&path_s), json!({"index": result.index, "kind": o.kind, "file": o.rel_path, "error": e.to_string()})).map_err(io)?;
+            }
+        }
+    }
+    Ok(a)
+}
+
+/// One message of an mbox as an item of its own: `message_started`, `message_hashed` (digests of the stored
+/// bytes, read again from the mbox), the analysis, `item_analyzed`.
+#[allow(clippy::too_many_arguments)]
+fn message_item(
+    cfg: &RunConfig,
+    log: &mut AuditLog,
+    dns_keys: &mut BTreeMap<String, Option<KeyRecord>>,
+    report_dir: &Path,
+    container: &ItemResult,
+    head: &[u8],
+    m: &MboxMessageRef,
+    sink: &mut dyn FnMut(&Event),
+) -> Result<ItemResult, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let io = |e: std::io::Error| format!("audit log write failed: {}", e);
+    let id = m.id.clone();
+    let mut r = ItemResult {
+        index: container.index,
+        path: PathBuf::from(&id),
+        size: m.length,
+        modified_utc: container.modified_utc.clone(),
+        hashes: vec![],
+        detected_type: None,
+        extension: None,
+        findings: vec![],
+        error: None,
+        audit_first_seq: 0,
+        audit_last_seq: 0,
+        evidence_id: container.evidence_id.clone(),
+        case_status: None,
+        intake_utc: container.intake_utc.clone(),
+        details: Value::Null,
+        outputs: vec![],
+        message: Some(MboxMessageRef {
+            container_path: container.path.display().to_string(),
+            container_hashes: container
+                .hashes
+                .iter()
+                .map(|(a, h)| (a.name().to_string(), h.clone()))
+                .collect(),
+            ..m.clone()
+        }),
+    };
+    r.audit_first_seq = log
+        .record(
+            "message_started",
+            Some(&id),
+            json!({"index": container.index, "container": container.path.display().to_string(), "n": m.n,
+                   "offset": m.offset, "message_offset": m.message_offset, "length": m.length,
+                   "from_line": m.from_line}),
+        )
+        .map_err(io)?;
+    sink(&Event::ItemStarted {
+        index: container.index,
+        path: id.clone(),
+        size: m.length,
+    });
+    let digests = std::fs::File::open(&container.path).and_then(|mut f| {
+        f.seek(SeekFrom::Start(m.message_offset))?;
+        hash_reader(f.take(m.length), &cfg.algorithms, &mut |_| true)
+    });
+    match digests {
+        Ok(Some(d)) => {
+            let hashes: BTreeMap<String, String> = d
+                .digests
+                .iter()
+                .map(|(a, h)| (a.name().to_string(), h.clone()))
+                .collect();
+            log.record(
+                "message_hashed",
+                Some(&id),
+                json!({"index": container.index, "n": m.n, "bytes_read": d.bytes, "hashes": hashes}),
+            )
+            .map_err(io)?;
+            r.hashes = d.digests;
+        }
+        Ok(None) => {}
+        Err(e) => {
+            r.error = Some(e.to_string());
+            r.findings
+                .push(Finding::new("UNREADABLE", Severity::High).with("error", e.to_string()));
+            log.record(
+                "item_error",
+                Some(&id),
+                json!({"index": container.index, "n": m.n, "message": e.to_string()}),
+            )
+            .map_err(io)?;
+        }
+    }
+    if r.error.is_none() {
+        // The worker gets the reference WITH the mbox's path and digests, so headers.json cites its source.
+        let cited = r.message.clone();
+        let a = analyze_recorded(
+            cfg,
+            log,
+            dns_keys,
+            report_dir,
+            &mut r,
+            head,
+            &container.path,
+            cited.as_ref().or(Some(m)),
+        )?;
+        r.detected_type = a.detected_type;
+        r.extension = container.extension.clone();
+        r.findings.extend(a.findings);
+        r.details = a.details;
+    }
+    r.audit_last_seq = log
+        .record(
+            "item_analyzed",
+            Some(&id),
+            json!({"index": container.index, "message": m.n, "detected_type": r.detected_type, "extension": r.extension,
+                   "findings": r.findings, "status": r.status(), "analysis": crate::analyzer::audit_summary(&r.details)}),
+        )
+        .map_err(io)?;
+    sink(&Event::ItemFinished {
+        index: container.index,
+        path: id,
+        status: r.status().into(),
+        findings: r.findings.iter().map(|f| f.code.clone()).collect(),
+    });
+    Ok(r)
 }
 
 /// Analysis: compares the fresh hashes with the registry (by --evidence id, else by path, else by content).
@@ -862,7 +1198,8 @@ fn register_items(
 ) -> Result<(), String> {
     let io = |e: std::io::Error| format!("audit log write failed: {}", e);
     let idx: Vec<usize> = (0..results.len())
-        .filter(|&i| !results[i].hashes.is_empty())
+        // Messages of an mbox are parts of a registered file, not files: only the mbox is registered.
+        .filter(|&i| !results[i].hashes.is_empty() && results[i].message.is_none())
         .collect();
     if idx.is_empty() {
         return Ok(());
@@ -923,8 +1260,47 @@ fn register_items(
     Ok(())
 }
 
+/// The fetched DKIM key records a message needs: those named in `names` that DNS returned, in `names` order.
+fn keys_for_message(
+    names: &[String],
+    cache: &BTreeMap<String, Option<KeyRecord>>,
+) -> Vec<KeyRecord> {
+    names
+        .iter()
+        .filter_map(|n| cache.get(n).cloned().flatten())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_worker_gets_only_its_own_fetched_keys() {
+        let rec = |n: &str| KeyRecord {
+            name: n.into(),
+            txt: "v=DKIM1; k=rsa; p=AAAA".into(),
+            source: "current_dns".into(),
+            ..KeyRecord::default()
+        };
+        let mut cache: BTreeMap<String, Option<KeyRecord>> = BTreeMap::new();
+        for d in 0..300 {
+            let n = format!("s{d}._domainkey.d{d}.example");
+            cache.insert(n.clone(), Some(rec(&n)));
+        }
+        cache.insert("gone._domainkey.example.org".into(), None);
+        let names = vec![
+            "s7._domainkey.d7.example".to_string(),
+            "gone._domainkey.example.org".to_string(),
+            "unknown._domainkey.example.net".to_string(),
+        ];
+        let got = keys_for_message(&names, &cache);
+        assert_eq!(
+            got.len(),
+            1,
+            "only the message's found keys, not the batch cache"
+        );
+        assert_eq!(got[0].name, "s7._domainkey.d7.example");
+    }
+
     use super::*;
 
     fn cfg(input: PathBuf, out: PathBuf) -> RunConfig {
@@ -1011,7 +1387,7 @@ mod tests {
     }
 
     fn sample_copy(dir: &Path) -> PathBuf {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/inventory");
         let ev = dir.join("evidence");
         std::fs::create_dir_all(&ev).unwrap();
         for e in std::fs::read_dir(src).unwrap() {

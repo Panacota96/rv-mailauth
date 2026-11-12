@@ -1,0 +1,25 @@
+Return-Path: <bruno@example.org>
+Received: from smtp.example.org (smtp.example.org [192.0.2.25]) by mx.acme.example with ESMTPS id 4F2A1; Tue, 10 Nov 2026 09:15:03 +0000
+DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/simple; d=example.org;
+ i=@example.org; q=dns/txt; s=ed2026; t=1794437779; h=from : to :
+ subject : date : message-id : mime-version : content-type :
+ content-transfer-encoding : from;
+ bh=LbpUiHIAFi1eNPNhg44xWzuLBUEw6NxdZq+RGA4z8uQ=;
+ b=KSrMJwN0Yuc3/iL7QEHE6fcTFvefDECzyLqQQgYqt8iHvfaF9yiB9Cws3MIEY5ftDjq66
+ LRCVDcVnjNZF8qyAw==
+Received: from [192.0.2.10] (laptop.example.org) by smtp.example.org with ESMTPSA id 77B1 for <ana@acme.example>; Tue, 10 Nov 2026 10:15:00 +0100
+From: Bruno Proveedor <bruno@example.org>
+To: Ana Compras <ana@acme.example>
+Subject: Compte rendu
+Date: Tue, 10 Nov 2026 10:15:00 +0100
+Message-ID: <20261110101500.2@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Bonjour Ana,
+
+voici le compte rendu de la réunion.
+
+Cordialement,
+Bruno

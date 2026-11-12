@@ -1,8 +1,10 @@
 //! The window. Drawing only: rules live in `state.rs`, work lives in the core (on a worker thread).
 //! Rakvor dark theme; interface language EN/ES/FR switchable at any time (texts from i18n "ui").
 
-use crate::state::{GuiState, Phase};
+use crate::state::{GuiState, OptionChange, Phase};
+use crate::viewer::{HopView, delta_text};
 use eframe::egui;
+use rv_mailauth_core::model::Severity;
 use rv_mailauth_core::{Event, HashAlgo, RunConfig, RunSummary, TOOL_VERSION};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,6 +19,17 @@ const BLUE: egui::Color32 = egui::Color32::from_rgb(0x2A, 0x5C, 0xFF);
 const VIOLET: egui::Color32 = egui::Color32::from_rgb(0x6B, 0x00, 0xFF);
 const CYAN: egui::Color32 = egui::Color32::from_rgb(0x00, 0xE5, 0xFF);
 const MIST: egui::Color32 = egui::Color32::from_rgb(0xE6, 0xE6, 0xE6);
+const RED: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x6B, 0x6B);
+const AMBER: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xB0, 0x40);
+const YELLOW: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xD3, 0x5B);
+const GREEN: egui::Color32 = egui::Color32::from_rgb(0x4C, 0xD0, 0x8A);
+const GREY: egui::Color32 = egui::Color32::from_rgb(0x9A, 0xA4, 0xB2);
+// Preset values for the numeric options (one click = one audited change; the current value is always listed).
+const SKEW_PRESETS: [u64; 6] = [0, 60, 300, 900, 3600, 86_400];
+const TIMEOUT_PRESETS: [u64; 5] = [30, 60, 120, 300, 600];
+const MEMORY_PRESETS: [u64; 5] = [512, 1024, 2048, 4096, 8192];
+const MAX_MESSAGE_PRESETS: [u64; 5] = [25, 50, 100, 200, 1024];
+const MAX_MBOX_PRESETS: [u64; 5] = [1_000, 10_000, 50_000, 100_000, 1_000_000];
 const UI_LANGS: [(&str, &str); 3] = [("en", "English"), ("es", "Español"), ("fr", "Français")];
 
 enum Msg {
@@ -33,6 +46,45 @@ pub struct HashInvApp {
     themed: bool,
     /// Case folder being typed; applied (and audited) when the field loses focus.
     case_entry: String,
+    /// DKIM key file being typed; applied (and audited) when the field loses focus.
+    dkim_entry: String,
+}
+
+fn severity_color(s: Severity) -> egui::Color32 {
+    match s {
+        Severity::High => RED,
+        Severity::Medium => AMBER,
+        Severity::Low => YELLOW,
+        Severity::Info => GREY,
+    }
+}
+
+fn status_color(status: &str) -> egui::Color32 {
+    match status {
+        "problem" => RED,
+        "attention" => AMBER,
+        _ => GREEN,
+    }
+}
+
+fn preset_combo(ui: &mut egui::Ui, id: &str, current: u64, presets: &[u64]) -> Option<u64> {
+    let mut values: Vec<u64> = presets.to_vec();
+    if !values.contains(&current) {
+        values.push(current);
+        values.sort();
+    }
+    let mut picked = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(current.to_string())
+        .width(90.0)
+        .show_ui(ui, |ui| {
+            for v in values {
+                if ui.selectable_label(v == current, v.to_string()).clicked() && v != current {
+                    picked = Some(v);
+                }
+            }
+        });
+    picked
 }
 
 /// Applies the Rakvor dark theme.
@@ -66,7 +118,31 @@ impl HashInvApp {
             notice: None,
             themed: false,
             case_entry: String::new(),
+            dkim_entry: String::new(),
         }
+    }
+
+    /// A window over an existing state (headless rendering, e.g. the documentation screenshots).
+    pub fn from_state(state: GuiState) -> Self {
+        let dkim_entry = state
+            .options
+            .dkim_keys
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        HashInvApp {
+            state,
+            dkim_entry,
+            ..Self::new()
+        }
+    }
+
+    pub fn state(&self) -> &GuiState {
+        &self.state
+    }
+
+    pub fn state_mut(&mut self) -> &mut GuiState {
+        &mut self.state
     }
 
     /// Starts with evidence already selected (paths given to the executable).
@@ -138,7 +214,11 @@ impl HashInvApp {
                     }
                     self.state.apply(&e)
                 }
-                Msg::Done(Ok(_)) => finished = true,
+                Msg::Done(Ok(_)) => {
+                    // The run is closed: read it back from its audit log for the results table.
+                    self.state.load_results();
+                    finished = true;
+                }
                 Msg::Done(Err(e)) => {
                     self.state.fail(e);
                     finished = true;
@@ -636,6 +716,633 @@ impl HashInvApp {
     }
 }
 
+impl HashInvApp {
+    fn apply_option(&mut self, c: OptionChange) {
+        if let Err(e) = self.state.set_option(c) {
+            self.notice = Some(e);
+        }
+    }
+
+    fn options_section(&mut self, ui: &mut egui::Ui, enabled: bool) {
+        Self::section_title(ui, self.state.tr("options"));
+        let tr = |k: &str| self.state.tr(k);
+        let (l_keys, l_keys_hint, l_online, l_online_note, l_domains, l_domain_hint, l_add) = (
+            tr("opt_dkim_keys"),
+            tr("opt_dkim_keys_hint"),
+            tr("opt_online"),
+            tr("opt_online_note"),
+            tr("opt_own_domains"),
+            tr("opt_own_domain_hint"),
+            tr("opt_add"),
+        );
+        let (l_none, l_att, l_skew, l_mbox, l_reports, l_all, l_flagged, l_browse) = (
+            tr("opt_no_domains"),
+            tr("opt_attachments"),
+            tr("opt_clock_skew"),
+            tr("opt_mbox_variant"),
+            tr("opt_item_reports"),
+            tr("opt_reports_all"),
+            tr("opt_reports_flagged"),
+            tr("browse"),
+        );
+        let (l_worker, l_worker_note, l_timeout, l_memory, l_max_msg, l_max_mbox) = (
+            tr("opt_worker"),
+            tr("opt_worker_note"),
+            tr("opt_timeout"),
+            tr("opt_memory"),
+            tr("opt_max_message"),
+            tr("opt_max_mbox"),
+        );
+        ui.add_enabled_ui(enabled, |ui| {
+            egui::Grid::new("options-grid")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label(&l_keys);
+                    ui.horizontal(|ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut self.dkim_entry)
+                                .hint_text(&l_keys_hint)
+                                .desired_width(420.0),
+                        );
+                        if r.lost_focus() {
+                            let e = self.dkim_entry.clone();
+                            self.apply_option(OptionChange::DkimKeys(e));
+                        }
+                        #[cfg(windows)]
+                        if ui.button(&l_browse).clicked()
+                            && let Some(f) = rfd::FileDialog::new()
+                                .add_filter("DKIM keys", &["txt", "zone", "db"])
+                                .pick_file()
+                        {
+                            self.dkim_entry = f.display().to_string();
+                            let e = self.dkim_entry.clone();
+                            self.apply_option(OptionChange::DkimKeys(e));
+                        }
+                        let _ = &l_browse;
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.vertical(|ui| {
+                        let mut on = self.state.options.online_dns;
+                        if ui.checkbox(&mut on, &l_online).changed() {
+                            self.apply_option(OptionChange::OnlineDns(on));
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&l_online_note).size(11.0).color(if on {
+                                    AMBER
+                                } else {
+                                    GREY
+                                }),
+                            )
+                            .wrap(),
+                        );
+                    });
+                    ui.end_row();
+                    ui.label(&l_domains);
+                    ui.vertical(|ui| {
+                        let mut remove = None;
+                        ui.horizontal_wrapped(|ui| {
+                            if self.state.options.own_domains.is_empty() {
+                                ui.weak(&l_none);
+                            }
+                            for d in &self.state.options.own_domains {
+                                if ui.small_button("x").clicked() {
+                                    remove = Some(d.clone());
+                                }
+                                ui.monospace(d);
+                                ui.add_space(8.0);
+                            }
+                        });
+                        if let Some(d) = remove {
+                            self.apply_option(OptionChange::RemoveOwnDomain(d));
+                        }
+                        ui.horizontal(|ui| {
+                            let r = ui.add(
+                                egui::TextEdit::singleline(&mut self.state.own_domain_entry)
+                                    .hint_text(&l_domain_hint)
+                                    .desired_width(220.0),
+                            );
+                            let enter =
+                                r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if (ui.button(&l_add).clicked() || enter)
+                                && !self.state.own_domain_entry.trim().is_empty()
+                            {
+                                let d = self.state.own_domain_entry.clone();
+                                self.apply_option(OptionChange::AddOwnDomain(d));
+                            }
+                        });
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    let mut att = self.state.options.extract_attachments;
+                    if ui.checkbox(&mut att, &l_att).changed() {
+                        self.apply_option(OptionChange::ExtractAttachments(att));
+                    }
+                    ui.end_row();
+                    ui.label(&l_skew);
+                    ui.horizontal(|ui| {
+                        if let Some(v) = preset_combo(
+                            ui,
+                            "opt-skew",
+                            self.state.options.clock_skew_s,
+                            &SKEW_PRESETS,
+                        ) {
+                            self.apply_option(OptionChange::ClockSkew(v));
+                        }
+                        ui.add_space(16.0);
+                        ui.label(&l_mbox);
+                        let mut picked = None;
+                        egui::ComboBox::from_id_salt("opt-mbox")
+                            .selected_text(self.state.options.mbox_variant.clone())
+                            .show_ui(ui, |ui| {
+                                for v in crate::state::MBOX_VARIANTS {
+                                    if ui
+                                        .selectable_label(self.state.options.mbox_variant == v, v)
+                                        .clicked()
+                                    {
+                                        picked = Some(v.to_string());
+                                    }
+                                }
+                            });
+                        if let Some(v) = picked {
+                            self.apply_option(OptionChange::MboxVariant(v));
+                        }
+                    });
+                    ui.end_row();
+                    ui.label(&l_reports);
+                    ui.horizontal(|ui| {
+                        let flagged = self.state.options.item_reports_flagged_only;
+                        if ui.radio(!flagged, &l_all).clicked() {
+                            self.apply_option(OptionChange::ItemReportsFlaggedOnly(false));
+                        }
+                        if ui.radio(flagged, &l_flagged).clicked() {
+                            self.apply_option(OptionChange::ItemReportsFlaggedOnly(true));
+                        }
+                    });
+                    ui.end_row();
+                });
+            egui::CollapsingHeader::new(&l_worker)
+                .id_salt("opt-worker")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.weak(&l_worker_note);
+                    egui::Grid::new("worker-grid")
+                        .num_columns(2)
+                        .spacing([12.0, 6.0])
+                        .show(ui, |ui| {
+                            let o = self.state.options.clone();
+                            ui.label(&l_timeout);
+                            if let Some(v) = preset_combo(
+                                ui,
+                                "opt-timeout",
+                                o.worker_timeout_s,
+                                &TIMEOUT_PRESETS,
+                            ) {
+                                self.apply_option(OptionChange::WorkerTimeout(v));
+                            }
+                            ui.end_row();
+                            ui.label(&l_memory);
+                            if let Some(v) =
+                                preset_combo(ui, "opt-memory", o.worker_memory_mb, &MEMORY_PRESETS)
+                            {
+                                self.apply_option(OptionChange::WorkerMemory(v));
+                            }
+                            ui.end_row();
+                            ui.label(&l_max_msg);
+                            if let Some(v) = preset_combo(
+                                ui,
+                                "opt-max-msg",
+                                self.state.max_message_mb(),
+                                &MAX_MESSAGE_PRESETS,
+                            ) {
+                                self.apply_option(OptionChange::MaxMessageMb(v));
+                            }
+                            ui.end_row();
+                            ui.label(&l_max_mbox);
+                            if let Some(v) = preset_combo(
+                                ui,
+                                "opt-max-mbox",
+                                o.max_mbox_messages,
+                                &MAX_MBOX_PRESETS,
+                            ) {
+                                self.apply_option(OptionChange::MaxMboxMessages(v));
+                            }
+                            ui.end_row();
+                        });
+                });
+        });
+    }
+
+    /// Results table: one row per file, mbox messages indented under their mbox; "Open" on every message.
+    fn results_section(&mut self, ui: &mut egui::Ui) {
+        if let Some(e) = &self.state.run_view_error {
+            ui.colored_label(
+                RED,
+                format!("{}: {}", self.state.tr("results_unreadable"), e),
+            );
+            return;
+        }
+        let Some(run) = &self.state.run_view else {
+            return;
+        };
+        let mut open = None;
+        let tr = |k: &str| self.state.tr(k);
+        egui::CollapsingHeader::new(format!("{} ({})", tr("results"), run.rows.len()))
+            .id_salt("results")
+            .default_open(true)
+            .show(ui, |ui| {
+                if let Some(e) = &self.state.message_error {
+                    ui.colored_label(RED, format!("{}: {}", tr("message_refused"), e));
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(480.0)
+                    .id_salt("results-scroll")
+                    .show(ui, |ui| {
+                        egui::Grid::new("results-grid")
+                            .num_columns(5)
+                            .striped(true)
+                            .spacing([14.0, 4.0])
+                            .show(ui, |ui| {
+                                ui.strong("#");
+                                ui.strong(tr("col_file"));
+                                ui.strong(tr("col_type"));
+                                ui.strong(tr("col_status"));
+                                ui.strong(tr("col_findings"));
+                                ui.end_row();
+                                for (i, r) in run.rows.iter().enumerate() {
+                                    ui.monospace(r.label());
+                                    let name = match (r.message, r.offset) {
+                                        (Some(_), Some(o)) => format!("    {}  @{}", r.name, o),
+                                        (Some(_), None) => format!("    {}", r.name),
+                                        _ => r.name.clone(),
+                                    };
+                                    ui.label(name);
+                                    ui.weak(&r.detected_type);
+                                    ui.colored_label(
+                                        status_color(&r.status),
+                                        self.state.status_name(&r.status),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        let c = r.counts();
+                                        for (n, col) in c.iter().zip([RED, AMBER, YELLOW, GREY]) {
+                                            ui.colored_label(
+                                                if *n > 0 { col } else { GREY },
+                                                format!("{n:>2}"),
+                                            );
+                                        }
+                                        if r.viewable()
+                                            && ui.small_button(tr("open_message")).clicked()
+                                        {
+                                            open = Some(i);
+                                        }
+                                    });
+                                    ui.end_row();
+                                }
+                            });
+                    });
+            });
+        if let Some(i) = open {
+            self.state.open_message(i);
+        }
+    }
+
+    /// The message viewer page (only digest-checked outputs; see viewer.rs).
+    fn viewer_page(&mut self, ui: &mut egui::Ui) {
+        let Some(m) = self.state.message.clone() else {
+            return;
+        };
+        let tr = |k: &str| self.state.tr(k);
+        let mut back = false;
+        ui.horizontal(|ui| {
+            back = ui.button(tr("back")).clicked();
+            ui.label(
+                egui::RichText::new(tr("viewer_title"))
+                    .color(CYAN)
+                    .strong()
+                    .size(16.0),
+            );
+            ui.label(egui::RichText::new(&m.title).strong().size(15.0));
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.colored_label(GREEN, tr("digest_ok"));
+            for (f, h) in &m.files {
+                ui.weak(format!("{}  SHA-256 {}…", f, &h[..h.len().min(16)]));
+            }
+        });
+        match &self.state.review_error {
+            Some(e) => {
+                ui.colored_label(AMBER, format!("{} {}", tr("review_log_failed"), e));
+            }
+            None => {
+                ui.weak(tr("review_logged"));
+            }
+        }
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .id_salt("viewer-scroll")
+            .show(ui, |ui| {
+                ui.columns(2, |cols| {
+                    self.viewer_left(&mut cols[0], &m);
+                    self.viewer_right(&mut cols[1], &m);
+                });
+            });
+        if back {
+            self.state.close_message();
+        }
+    }
+
+    fn viewer_left(&self, ui: &mut egui::Ui, m: &crate::viewer::MessageView) {
+        let tr = |k: &str| self.state.tr(k);
+        Self::section_title(ui, tr("sec_addresses"));
+        egui::Grid::new("addr-grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .show(ui, |ui| {
+                for a in &m.addresses {
+                    ui.label(tr(a.role));
+                    if a.mismatch {
+                        ui.colored_label(AMBER, format!("{}   ({})", a.value, tr("addr_mismatch")));
+                    } else {
+                        ui.label(&a.value);
+                    }
+                    ui.end_row();
+                }
+            });
+
+        Self::section_title(ui, tr("sec_hops"));
+        let h = &m.headers;
+        ui.label(format!(
+            "{}: {}   \u{00B7}   {}: {}",
+            tr("date_header"),
+            h.date_utc.clone().unwrap_or_else(|| "\u{2014}".into()),
+            tr("date_to_first_hop"),
+            delta_text(m.date_to_first_hop_s())
+        ));
+        if m.hops.is_empty() {
+            ui.weak(tr("no_hops"));
+        } else {
+            egui::Grid::new("hop-grid")
+                .num_columns(5)
+                .striped(true)
+                .spacing([10.0, 4.0])
+                .show(ui, |ui| {
+                    ui.strong(tr("hop"));
+                    ui.strong(tr("hop_route"));
+                    ui.strong(tr("col_date_utc"));
+                    ui.strong(tr("col_delta"));
+                    ui.strong("");
+                    ui.end_row();
+                    for x in &m.hops {
+                        self.hop_row(ui, x);
+                    }
+                });
+        }
+
+        Self::section_title(ui, tr("sec_dkim"));
+        let d = &m.dkim;
+        ui.label(format!(
+            "{}: {}   \u{00B7}   {}: {}  ({} keys)",
+            tr("dkim_mode"),
+            d.mode,
+            tr("opt_dkim_keys"),
+            d.key_file
+                .as_deref()
+                .map(|f| {
+                    std::path::Path::new(f)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| f.to_string())
+                })
+                .unwrap_or_else(|| tr("key_none")),
+            d.keys_loaded
+        ));
+        if !d.evaluated {
+            ui.colored_label(
+                AMBER,
+                format!(
+                    "{}: {}",
+                    tr("dkim_not_evaluated"),
+                    d.not_evaluated_reason.clone().unwrap_or_default()
+                ),
+            );
+        }
+        if d.signatures.is_empty() {
+            ui.weak(tr("dkim_no_signature"));
+        } else {
+            egui::Grid::new("dkim-grid")
+                .num_columns(7)
+                .striped(true)
+                .spacing([10.0, 4.0])
+                .show(ui, |ui| {
+                    for l in [
+                        "#".to_string(),
+                        "d=".into(),
+                        "s=".into(),
+                        tr("col_algorithm"),
+                        tr("col_result"),
+                        tr("col_key_source"),
+                        tr("col_aligned"),
+                    ] {
+                        ui.strong(l);
+                    }
+                    ui.end_row();
+                    for s in &d.signatures {
+                        ui.monospace(s.index.to_string());
+                        ui.monospace(&s.domain);
+                        ui.monospace(&s.selector);
+                        ui.label(&s.algorithm);
+                        let col = match s.result.as_str() {
+                            "pass" => GREEN,
+                            "body_hash_mismatch" => RED,
+                            "signature_invalid" => AMBER,
+                            _ => GREY,
+                        };
+                        ui.colored_label(col, &s.result)
+                            .on_hover_text(s.reason.clone().unwrap_or_default());
+                        let src = match s.key_source.as_str() {
+                            "key_file" => match s.key_line {
+                                Some(l) => format!("{} ({} {})", tr("key_file"), tr("line"), l),
+                                None => tr("key_file"),
+                            },
+                            "current_dns" => tr("key_dns"),
+                            _ => tr("key_none"),
+                        };
+                        if s.key_source == "current_dns" {
+                            ui.colored_label(AMBER, src);
+                        } else {
+                            ui.label(src);
+                        }
+                        ui.label(if s.aligned_with_from {
+                            tr("yes")
+                        } else {
+                            tr("no")
+                        });
+                        ui.end_row();
+                    }
+                });
+        }
+        ui.label(format!(
+            "{}: {} ({}){}",
+            tr("arc"),
+            d.arc.result,
+            d.arc.instances,
+            d.arc
+                .reason
+                .as_ref()
+                .map(|r| format!(" \u{00B7} {r}"))
+                .unwrap_or_default()
+        ));
+    }
+
+    fn hop_row(&self, ui: &mut egui::Ui, x: &HopView) {
+        let tr = |k: &str| self.state.tr(k);
+        ui.monospace(x.position.to_string());
+        ui.label(format!("{} -> {}", x.from, x.by))
+            .on_hover_text(x.with.clone());
+        let zone = x
+            .tz_offset_min
+            .map(|m| format!(" ({:+03}:{:02})", m / 60, (m % 60).abs()))
+            .unwrap_or_default();
+        ui.monospace(format!(
+            "{}{}",
+            x.date_utc
+                .clone()
+                .or_else(|| x.date_raw.clone())
+                .unwrap_or_else(|| "\u{2014}".into()),
+            zone
+        ));
+        let delta = delta_text(x.delta_s);
+        if x.out_of_order {
+            ui.colored_label(RED, delta);
+            ui.colored_label(RED, tr("hop_out_of_order"));
+        } else if x.gap {
+            ui.colored_label(AMBER, delta);
+            ui.colored_label(AMBER, tr("hop_gap"));
+        } else if x.undated {
+            ui.label(delta);
+            ui.colored_label(GREY, tr("hop_undated"));
+        } else {
+            ui.label(delta);
+            ui.label("");
+        }
+        ui.end_row();
+    }
+
+    fn viewer_right(&self, ui: &mut egui::Ui, m: &crate::viewer::MessageView) {
+        let tr = |k: &str| self.state.tr(k);
+        Self::section_title(ui, tr("item_findings"));
+        let findings = self.state.message_findings();
+        if findings.is_empty() {
+            ui.weak(tr("no_findings"));
+        }
+        for f in &findings {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.colored_label(
+                        severity_color(f.severity),
+                        egui::RichText::new(self.state.severity_name(f.severity)).strong(),
+                    );
+                    ui.label(egui::RichText::new(&f.title).strong());
+                    ui.weak(&f.code);
+                });
+                ui.add(egui::Label::new(format!("{}: {}", tr("shows"), f.shows)).wrap());
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!("{}: {}", tr("not_proves"), f.not_proves))
+                            .color(GREY),
+                    )
+                    .wrap(),
+                );
+            });
+        }
+
+        Self::section_title(ui, tr("sec_headers"));
+        egui::Grid::new("hdr-grid")
+            .num_columns(2)
+            .striped(true)
+            .spacing([12.0, 4.0])
+            .show(ui, |ui| {
+                for (k, v) in m.header_rows() {
+                    ui.label(tr(&k));
+                    ui.add(egui::Label::new(egui::RichText::new(v).monospace()).wrap());
+                    ui.end_row();
+                }
+            });
+
+        Self::section_title(ui, tr("sec_attachments"));
+        if m.attachments.is_empty() {
+            ui.weak(tr("no_attachments"));
+        } else {
+            egui::Grid::new("att-grid")
+                .num_columns(4)
+                .striped(true)
+                .spacing([10.0, 4.0])
+                .show(ui, |ui| {
+                    ui.strong("#");
+                    ui.strong(tr("col_name"));
+                    ui.strong(tr("col_size"));
+                    ui.strong("SHA-256");
+                    ui.end_row();
+                    for a in &m.attachments {
+                        ui.monospace(a.index.to_string());
+                        ui.label(format!(
+                            "{}  ({})",
+                            a.file_name.clone().unwrap_or_else(|| "-".into()),
+                            a.content_type
+                        ));
+                        ui.monospace(a.size.to_string());
+                        ui.monospace(&a.sha256);
+                        ui.end_row();
+                    }
+                });
+            let total = m.attachments_total;
+            if total > m.attachments.len() as u64 {
+                ui.weak(format!(
+                    "+{} {}",
+                    total - m.attachments.len() as u64,
+                    tr("not_listed")
+                ));
+            }
+        }
+    }
+
+    /// Draws one frame into the root `ui` (what eframe calls every frame).
+    pub fn draw(&mut self, ui: &mut egui::Ui) {
+        if !self.themed {
+            apply_theme(ui.ctx());
+            self.themed = true;
+        }
+        self.drain();
+        if self.state.is_running() {
+            // Keep the elapsed timer moving even when no event arrives (large files).
+            ui.ctx().request_repaint_after(Duration::from_millis(200));
+        }
+        egui::CentralPanel::default().show(ui, |ui| {
+            if self.state.message.is_some() {
+                self.header(ui);
+                self.viewer_page(ui);
+                return;
+            }
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                self.header(ui);
+                let enabled = !self.state.is_running();
+                self.evidence_section(ui, enabled);
+                self.hashing_section(ui, enabled);
+                self.report_section(ui, enabled);
+                self.trust_section(ui, enabled);
+                self.options_section(ui, enabled);
+                self.run_section(ui);
+                if matches!(self.state.phase, Phase::Finished | Phase::Cancelled) {
+                    self.results_section(ui);
+                }
+            });
+        });
+    }
+}
+
 impl Default for HashInvApp {
     fn default() -> Self {
         Self::new()
@@ -653,26 +1360,7 @@ fn open_path(p: &Path) {
 
 impl eframe::App for HashInvApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if !self.themed {
-            apply_theme(ui.ctx());
-            self.themed = true;
-        }
-        self.drain();
-        if self.state.is_running() {
-            // Keep the elapsed timer moving even when no event arrives (large files).
-            ui.ctx().request_repaint_after(Duration::from_millis(200));
-        }
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                self.header(ui);
-                let enabled = !self.state.is_running();
-                self.evidence_section(ui, enabled);
-                self.hashing_section(ui, enabled);
-                self.report_section(ui, enabled);
-                self.trust_section(ui, enabled);
-                self.run_section(ui);
-            });
-        });
+        self.draw(ui);
     }
 }
 
@@ -735,5 +1423,103 @@ mod tests {
                 .as_deref()
                 .is_some_and(|n| n.contains("--case-dir"))
         );
+    }
+
+    /// Renders one frame headless (no display): what the window would draw for this state.
+    fn frame(app: &mut HashInvApp) {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(raw, |ui| app.draw(ui));
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_viewer_refuses_a_tampered_headers_json() {
+        let (s, out) = crate::state::tests::sample_run("tamper");
+        let mut app = HashInvApp::from_state(s);
+        frame(&mut app);
+        let run = app.state.run_view.clone().unwrap();
+        let row = run
+            .rows
+            .iter()
+            .position(|r| r.name == "03-body-edited.eml")
+            .unwrap();
+        assert!(app.state.open_message(row), "the untouched output opens");
+        frame(&mut app);
+        app.state.close_message();
+
+        // Edit the audited headers.json after the run (a changed From domain).
+        let f = run.rows[row].output("headers").unwrap();
+        let path = run.report_dir.join(&f.file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("example.org"));
+        std::fs::write(&path, text.replace("example.org", "example.com")).unwrap();
+
+        assert!(!app.state.open_message(row));
+        assert!(
+            app.state.message.is_none(),
+            "nothing from the file is shown"
+        );
+        let e = app.state.message_error.clone().unwrap();
+        assert!(
+            e.contains("headers.json") && e.contains("does not match the digest"),
+            "{e}"
+        );
+        frame(&mut app); // the refusal is drawn on the results page, not the viewer
+        assert!(app.state.message.is_none());
+
+        // Both the view and the refusal are in the run's review log, chained to run_finished.
+        let log_dir = app.state.outcome.as_ref().unwrap().log_dir.clone();
+        assert_eq!(rv_mailauth_core::review::verify(&log_dir), Ok(Some(2)));
+        let review = std::fs::read_to_string(log_dir.join("review.jsonl")).unwrap();
+        assert!(
+            review.contains("\"ui_message_viewed\"") && review.contains("\"ui_message_refused\"")
+        );
+
+        // A path outside the report folder is never read.
+        let mut evil = f.clone();
+        evil.file = "../../../etc/passwd".into();
+        assert!(
+            run.read_audited(&evil)
+                .unwrap_err()
+                .contains("not a path inside")
+        );
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn every_interface_text_exists_in_the_three_languages() {
+        let mut keys: Vec<String> = Vec::new();
+        for src in [include_str!("app.rs"), include_str!("viewer.rs")] {
+            for part in src.split("tr(\"").skip(1) {
+                keys.push(part.split('"').next().unwrap().to_string());
+            }
+            for part in src.split("\"addr_").skip(1) {
+                keys.push(format!("addr_{}", part.split('"').next().unwrap()));
+            }
+            for part in src.split("\"hdr_").skip(1) {
+                keys.push(format!("hdr_{}", part.split('"').next().unwrap()));
+            }
+        }
+        keys.extend(["status_ok", "status_attention", "status_problem"].map(String::from));
+        // (the split patterns of this test itself yield "addr_" / "hdr_" and "": not keys)
+        keys.retain(|k| !k.is_empty() && !k.ends_with('_') && !k.contains(['{', ' ']));
+        assert!(keys.len() > 60, "{}", keys.len());
+        for (lang, text) in [
+            ("en", include_str!("../../../i18n/en.json")),
+            ("es", include_str!("../../../i18n/es.json")),
+            ("fr", include_str!("../../../i18n/fr.json")),
+        ] {
+            let ui: serde_json::Value = serde_json::from_str(text).unwrap();
+            for k in &keys {
+                assert!(ui["ui"][k].is_string(), "ui key {k} missing in {lang}");
+            }
+        }
     }
 }

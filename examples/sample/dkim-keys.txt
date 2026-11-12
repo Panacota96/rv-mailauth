@@ -1,0 +1,9 @@
+# rv-mailauth sample DKIM public keys (synthetic; the private keys were discarded after signing).
+# Simple form: selector._domainkey.domain<TAB>TXT value. BIND zone-file records are accepted too.
+s2026._domainkey.example.org	v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAigAZ8K/WiQQh4BdnPMTOC+Vx77STtpa9rn+E3oQZNBFgHQV/j/Yw8gHX/hktNDDvFYgkkmmUTG4A6d+Gy9gzIdxxIZV5yC2uyHgKC9tlRodAEvEFHXX/sZMZeO6c1EvIoLHnfBDcT/qX/ibtVOQSMczuWxflDyW5S9H0fPL3ttx04mwXiksKziW2H/TH2LA2bUB2JSw8jDzeBiJnLpJBks2+cG1OPbKaQt5MHis+n6lPUKuv8yAs+UOn0GM8JArtrws2n8lHWETjv19PLZ0dxQTChix35+m2burCM0MHKoN4gOSP5QP9D5biCduedPCSwP/1DjJKoNS+RUgUWeAvkQIDAQAB
+# s2025 was rotated: this is the NEW key published under the same selector.
+s2025._domainkey.example.org	v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuENJQRJdL1H7gkCJ6LQkIP+QQN1HjfT6FFaqp+7RbgLmvhJ4+1M4CFeBTgLAQ1aifJUNAP/DK4WtHIwH7GMVP1vixwnunpYXvkiUUWBJJNBrexkZCRt0WZ1SUfYsNFh5gScAf1+yQ7oq5A/I3pHCZiwBqe9FkcoTgaIa7GkBn4HZHoNtjLE0Yd7KcM3o63/bI8awIT4UAHrSW+SNECn0VvaeR9x3JtT2lu8BHbo87tlwzLK1HovF6n1BGHQv8XXaBCg6TY493tRwVsB6Bpx+aLnlLY9XBuajl5pzsgaEZ0AdoFB+101FpLxkGIF8LMJi6prpLajcQo5Nwr1kBVcN0wIDAQAB
+ed2026._domainkey.example.org. 3600 IN TXT ( "v=DKIM1; k=ed25519; p=gLFtgEWf"
+        "/adXNdiOuX1lF3mdfGWJ50NglMFoPaxwK/E=" ) ; Ed25519
+m1._domainkey.mailer.example.com. IN TXT "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiPiPT40wLPKlNh/RUoXZ1T+9h3SM0tVOzptnUR+msqobKk7lmgUj3Xbim3" "cYT5PJl6+fCtQCZX1MtAGcTACPl/HRelH/8m8VT0a3P11kLUN7bhgxtU+3IrmujdEbtDgPIsRIRLT8oT7lW8U8JrZ1UZhMGeLk1TWvRXVwivPYhtROg31pzs+IjifDWIrPPk4aQ2GP27EvZcAFtYJDqqPqBKx1nMv7aYkhYs4VMVo6nUqoSTo7kSzG80g9H+O2iohfJweXUcmXIOnWrRHlQi6Nikmb5XqqXLDCHLXKzGVjH5ixf+fiKaFGEu3/WNDKfu/7/NtrWi6YFU1P7Udi0o4hvQIDAQAB"
+# s2019._domainkey.example.org is deliberately missing (DKIM_KEY_NOT_AVAILABLE).

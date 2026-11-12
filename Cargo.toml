@@ -9,7 +9,7 @@ version = "0.1.0"
 edition = "2024"
 license = "LicenseRef-Rakvor-Audit"
 publish = false
-rust-version = "1.88"
+rust-version = "1.98"
 authors = ["Rakvor"]
 repository = "https://github.com/Panacota96/rv-mailauth"
 
@@ -44,6 +44,16 @@ spki = "0.7"
 const-oid = { version = "0.9", features = ["db"] }
 rsa = { version = "0.9", features = ["sha2"] }
 sha2-legacy = { package = "sha2", version = "0.10" }
+# Email parsing and offline DKIM/ARC verification (rv-mailauth). mail-auth without its default aws-lc
+# backend (a C build): pure-Rust RustCrypto verification; hickory is only used in --online mode.
+mail-parser = "=1.0.1"
+mail-auth = { version = "=0.15.1", default-features = false, features = ["rust-crypto", "dns-hickory", "arc"] }
+cfb = "0.15"
+unicode-security = "0.1"
+idna = "1"
+tokio = { version = "1", default-features = false, features = ["rt"] }
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"

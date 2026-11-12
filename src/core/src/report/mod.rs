@@ -3,6 +3,7 @@
 //!
 //! HTML and PDF are rendered from the same view model (`*_context`), so they never disagree.
 
+pub mod mailview;
 pub mod pdf;
 
 use crate::analyzer::{Finding, Severity};
@@ -21,10 +22,16 @@ pub const SCHEMA_TECHNICAL: &str = "rakvor.item-technical/1";
 pub const SCHEMA_SUMMARY: &str = "rakvor.item-summary/1";
 
 /// Run-level limitations, always printed (what this tool cannot tell you).
-pub const LIMITATIONS: [&str; 4] = [
-    "SIGNATURE_TABLE_LIMITED",
-    "TIMESTAMPS_FROM_FILESYSTEM",
+pub const LIMITATIONS: [&str; 10] = [
+    "DKIM_NEEDS_KEY_AT_SENDING_TIME",
+    "MISSING_SIGNATURE_PROVES_NOTHING",
+    "MSG_MAY_LACK_TRANSPORT_HEADERS",
+    "BEC_HEURISTICS_FALSE_POSITIVES",
+    "HEADERS_ARE_CLAIMS",
+    "MBOX_ESCAPING_AMBIGUOUS",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY",
+    "TIMESTAMPS_FROM_FILESYSTEM",
+    "SIGNATURE_TABLE_LIMITED",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY",
 ];
 pub const SCHEMA_CUSTODY: &str = "rakvor.item-custody/1";
@@ -57,6 +64,16 @@ pub struct RunInfo {
     pub timestamp: Value,
     /// Set when the run works in a shared case folder (`--case-dir`).
     pub case: Option<CaseInfo>,
+    /// `--item-reports flagged`: items without findings above informational get no report folder.
+    pub item_reports_flagged_only: bool,
+}
+
+impl RunInfo {
+    /// Whether this item's report folder (`items/<folder>/`) is written: always, except for an item with
+    /// status ok under `--item-reports flagged`. Statistics reports link only to folders that exist.
+    pub fn item_reports_written(&self, it: &ItemResult) -> bool {
+        !(self.item_reports_flagged_only && it.status() == "ok")
+    }
 }
 
 /// Counts of how the run's items relate to the case registry.
@@ -107,6 +124,21 @@ pub struct ItemResult {
     /// registered | already_registered | verified | mismatch | not_in_registry
     pub case_status: Option<String>,
     pub intake_utc: Option<String>,
+    /// Domain data from the analysis (Analysis::details) and the files it wrote (with digests).
+    pub details: serde_json::Value,
+    pub outputs: Vec<OutputRecord>,
+    /// Set for one message of an mbox: `path` is then `<mbox path>#<n>@<offset>` (not a file), the hashes are
+    /// those of the stored message bytes, and the custody of the bytes is the custody of the mbox file.
+    pub message: Option<crate::model::MboxMessageRef>,
+}
+
+/// A file written by the analysis, after the pipeline hashed and audited it.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct OutputRecord {
+    pub rel_path: String,
+    pub kind: String,
+    pub bytes: u64,
+    pub hashes: BTreeMap<String, String>,
 }
 
 impl ItemResult {
@@ -339,12 +371,20 @@ pub fn statistics_context(
     let item_rows: Vec<Value> = items
         .iter()
         .map(|it| {
+            // No link to a folder that was not written (`--item-reports flagged`): status and counts only.
+            let link = run
+                .item_reports_written(it)
+                .then(|| format!("items/{}/technical.{}.html", it.folder(), lang));
             json!({"index": it.index, "file_name": it.file_name(), "size": it.size, "finding_count": it.findings.len(),
                    "evidence_id": it.evidence_id,
                    "status": it.status(), "status_label": c.label(&format!("status_{}", it.status())),
-                   "link": format!("items/{}/technical.{}.html", it.folder(), lang)})
+                   "link": link})
         })
         .collect();
+    m.insert(
+        "item_reports_flagged_only".into(),
+        json!(run.item_reports_flagged_only),
+    );
     m.insert("totals".into(), json!({"items": totals.items, "bytes": totals.bytes, "errors": totals.errors, "throughput_text": throughput(totals.bytes, run.elapsed_ms)}));
     m.insert("severity_rows".into(), json!(severity_rows));
     m.insert("code_rows".into(), json!(code_rows));
@@ -385,7 +425,40 @@ fn item_view(c: &Catalog, it: &ItemResult) -> Value {
         "audit_first_seq": it.audit_first_seq, "audit_last_seq": it.audit_last_seq,
         "evidence_id": it.evidence_id, "intake_utc": it.intake_utc, "case_status": it.case_status,
         "case_status_label": it.case_status.as_ref().map(|s| c.label(&format!("case_status_{}", s))),
+        "derived_text": derived_text(c, it),
     })
+}
+
+/// For one message of an mbox: the citation of its source (mbox path and digests, index, byte offsets).
+pub fn derived_text(c: &Catalog, it: &ItemResult) -> Option<String> {
+    let m = it.message.as_ref()?;
+    let mut p = BTreeMap::new();
+    p.insert("n".to_string(), m.n.to_string());
+    p.insert("container".to_string(), m.container_path.clone());
+    p.insert(
+        "hashes".to_string(),
+        m.container_hashes
+            .iter()
+            .map(|(a, h)| format!("{a} {h}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    p.insert("offset".to_string(), m.message_offset.to_string());
+    p.insert("length".to_string(), m.length.to_string());
+    p.insert("separator".to_string(), m.offset.to_string());
+    Some(crate::i18n::fill(&c.label("mail_derived_text"), &p))
+}
+
+/// Language-neutral citation of the source of an mbox message (technical and custody JSON).
+fn derived_json(it: &ItemResult) -> Value {
+    match &it.message {
+        Some(m) => {
+            json!({"container": m.container_path, "container_hashes": m.container_hashes, "n": m.n,
+                          "separator_offset": m.offset, "message_offset": m.message_offset, "length": m.length,
+                          "id": m.id})
+        }
+        None => Value::Null,
+    }
 }
 
 pub fn item_context(lang: &str, run: &RunInfo, it: &ItemResult, audit: &AuditRef) -> Value {
@@ -415,6 +488,7 @@ pub fn item_context(lang: &str, run: &RunInfo, it: &ItemResult, audit: &AuditRef
         "audit".into(),
         json!({"head": audit.head, "entries": audit.entries, "log_dir": audit.log_dir}),
     );
+    m.insert("mail".into(), mailview::mail_view(c, it));
     Value::Object(m)
 }
 
@@ -480,8 +554,19 @@ pub fn statistics_json(
         "findings_by_severity": sev, "findings_by_code": codes, "items_by_status": status, "items_by_type": types,
         "duplicate_groups": duplicate_groups(items).into_iter().map(|(h, idx)| json!({"hash": h, "items": idx.iter().map(|&i| items[i].index).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "case": run.case.as_ref().map(|c| c.to_json()),
-        "items": items.iter().map(|it| json!({"index": it.index, "evidence_id": it.evidence_id, "path": it.path.display().to_string(), "size": it.size, "status": it.status(),
-              "findings": it.findings.iter().map(|f| f.code.clone()).collect::<Vec<_>>(), "report_folder": format!("items/{}", it.folder())})).collect::<Vec<_>>(),
+        "item_reports": if run.item_reports_flagged_only { "flagged" } else { "all" },
+        "items": items.iter().map(|it| {
+            // Under `--item-reports flagged` the folder of an ok item holds only the per-message outputs
+            // (headers.json, dkim.json, ...), not the technical/summary/custody reports.
+            let written = run.item_reports_written(it);
+            let mut v = json!({"index": it.index, "evidence_id": it.evidence_id, "path": it.path.display().to_string(), "size": it.size, "status": it.status(),
+              "findings": it.findings.iter().map(|f| f.code.clone()).collect::<Vec<_>>(), "report_folder": format!("items/{}", it.folder()),
+              "item_reports_written": written});
+            if !written {
+                v["report_skipped"] = json!("item_reports_flagged_only");
+            }
+            v
+        }).collect::<Vec<_>>(),
         "limitations": LIMITATIONS,
         "audit": {"head": audit.head, "entries": audit.entries, "log_dir": audit.log_dir},
         "timestamp": if run.timestamp.is_object() { run.timestamp.clone() } else { json!({"status": "off"}) },
@@ -502,6 +587,8 @@ pub fn technical_json(run: &RunInfo, it: &ItemResult) -> Value {
         "findings": findings_json(it, &run.langs),
         "limitations": LIMITATIONS,
         "audit": {"first_seq": it.audit_first_seq, "last_seq": it.audit_last_seq},
+        "email": mailview::mail_json(it),
+        "derived_from": derived_json(it),
     })
 }
 
@@ -686,11 +773,19 @@ pub fn statistics_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         b.push(Block::Kv(rows));
     }
     b.push(Block::Heading(t("items")));
+    if ctx["item_reports_flagged_only"].as_bool() == Some(true) {
+        b.push(Block::Note(t("flagged_only_note")));
+    }
     b.push(Block::Kv(
         arr(ctx, "item_rows")
             .iter()
             .map(|r| {
                 let eid = s(r, "evidence_id");
+                let no_report = if r["link"].is_null() {
+                    format!(" \u{00B7} {}", t("item_report_not_written"))
+                } else {
+                    String::new()
+                };
                 (
                     if eid.is_empty() {
                         format!("#{}  {}", s(r, "index"), s(r, "file_name"))
@@ -698,12 +793,13 @@ pub fn statistics_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
                         format!("#{}  {}  {}", s(r, "index"), eid, s(r, "file_name"))
                     },
                     format!(
-                        "{} \u{00B7} {} {} \u{00B7} {} {}",
+                        "{} \u{00B7} {} {} \u{00B7} {} {}{}",
                         s(r, "status_label"),
                         s(r, "size"),
                         t("bytes").to_lowercase(),
                         s(r, "finding_count"),
-                        t("findings").to_lowercase()
+                        t("findings").to_lowercase(),
+                        no_report
                     ),
                 )
             })
@@ -756,6 +852,9 @@ pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         (t("detected_type"), s(ctx, "item.detected_text")),
         (t("status"), s(ctx, "item.status_label")),
     ];
+    if !s(ctx, "item.derived_text").is_empty() {
+        rows.push((t("mail_derived_from"), s(ctx, "item.derived_text")));
+    }
     if ctx["case"].is_object() {
         rows.push((t("case"), s(ctx, "case.case_id")));
         rows.push((
@@ -793,6 +892,15 @@ pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
                 (t("does_not_prove"), s(x, "does_not_prove")),
             ],
         });
+    }
+    for sec in arr(&ctx["mail"], "sections") {
+        b.push(Block::Heading(s(sec, "title")));
+        b.push(Block::Kv(
+            arr(sec, "rows")
+                .iter()
+                .map(|r| (s(r, "k"), s(r, "v")))
+                .collect(),
+        ));
     }
     b.push(Block::Heading(t("method")));
     b.push(Block::Para(t("method_text")));
@@ -907,6 +1015,7 @@ pub fn custody_json(run: &RunInfo, it: &ItemResult) -> Value {
         "intake_utc": it.intake_utc,
         "item": {"index": it.index, "path": it.path.display().to_string(), "file_name": it.file_name(), "size": it.size},
         "hashes": it.hashes.iter().map(|(a, h)| (a.name().to_string(), json!(h))).collect::<serde_json::Map<_, _>>(),
+        "derived_from": derived_json(it),
         "examiner": run.actor,
         "operations": [{"tool": run.tool_name, "version": run.tool_version, "start_utc": run.started_utc, "end_utc": run.finished_utc,
                         "audit_first_seq": it.audit_first_seq, "audit_last_seq": it.audit_last_seq}],
@@ -987,6 +1096,9 @@ pub fn custody_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         }
         if !c("intake_utc").is_empty() {
             rows.insert(2, (c("intake_date"), c("intake_utc")));
+        }
+        if !s(ctx, "item.derived_text").is_empty() {
+            rows.push((t("mail_derived_from"), s(ctx, "item.derived_text")));
         }
     }
     finish(ctx, &c("title"), &b, run)

@@ -1,13 +1,8 @@
-<!--
-  Template note for the docs agent of a tool scaffolded from rv-mailauth: steps 1–5 and 7–11 are shared (release
-  assets, verification, installer, offline use, build from source, uninstall). Rewrite the parts between
-  forge:domain markers: native libraries the tool needs, and the expected result of the sample run.
--->
-
 # Installation and verification (Windows 10/11)
 
 RV MailAuth runs **locally** on the examiner's Windows 10 or 11 PC (x64). It needs no administrator rights, no
-runtime (static C runtime) and no network, except for the optional RFC 3161 timestamp. This page covers: getting a
+runtime (static C runtime) and no network, except for the optional RFC 3161 timestamp and the optional `--online`
+DKIM key lookup. This page covers: getting a
 release, **proving it is the genuine build**, installing it (portable zip or per-user installer), the first-run
 self-test, offline use, building from source for auditors, where files live, and uninstalling.
 
@@ -38,9 +33,9 @@ flowchart TB
 | Operating system | Windows 10 or 11, x64 (`MinVersion=10.0`, `ArchitecturesAllowed=x64compatible` in the installer). Linux/macOS: build from source. |
 | Rights | Standard user. The installer is per-user (`PrivilegesRequired=lowest`). |
 | Disk | The two executables and the docs (a few MB); outputs need about 11 report files per item for one language (19 with `--lang all`) plus the logs. |
-| Memory | Files are streamed in 1 MiB chunks: memory use does not grow with file size. |
+| Memory | Files are hashed in 1 MiB chunks. Each message is parsed in its own worker process, limited to `--worker-memory-mb` (default 1024 MiB) and `--max-message-mb` (default 200 MiB); an mbox is split by a streaming byte scan, so its size does not grow memory use. |
 | Graphics | None required: the GUI also runs on VMs without a GPU driver (software rendering). |
-| Network | None, except the optional timestamp request (see [step 7](#7-offline-and-air-gapped-use)). |
+| Network | None, except the optional timestamp request and `--online` key lookups (see [step 7](#7-offline-and-air-gapped-use)). |
 
 ## 1. Download
 
@@ -159,17 +154,17 @@ Unattended:
 .\rv-mailauth-0.1.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="addtopath"
 ```
 
-The installer copies the executables, README, LICENSE, NOTICE, CHANGELOG, `docs\` and the sample evidence
-(`examples\sample\evidence\`), not the sample scripts or `expected_hashes.csv` (those are in the zip and the source
-tree).
+The installer copies the executables, README, LICENSE, NOTICE, CHANGELOG, `docs\`, the sample evidence
+(`examples\sample\evidence\`) and the sample's public keys (`examples\sample\dkim-keys.txt`), not the sample
+scripts, `expected_findings.json` or `expected_hashes.csv` (those are in the zip and the source tree).
 
-<!-- forge:domain -->
 ### 5c. Native libraries
 
-None. RV MailAuth is two self-contained executables: hashing, the PDF writer, the RFC 3161 client and the CMS
-signer are compiled in (pure Rust crates, listed in the SBOM), and the C runtime is linked statically
-(`.cargo/config.toml`). There is no DLL to verify or to keep next to the executables.
-<!-- /forge:domain -->
+None. RV MailAuth is two self-contained executables: hashing, MIME parsing (mail-parser), DKIM/ARC verification
+(mail-auth with its pure-Rust `rust-crypto` backend, not the C library aws-lc), the Outlook compound-file reader,
+the Public Suffix List (a data file compiled in), the PDF writer, the RFC 3161 client and the CMS signer are
+compiled in (pure Rust crates, listed in the SBOM), and the C runtime is linked statically (`.cargo/config.toml`).
+There is no DLL to verify or to keep next to the executables.
 
 ## 6. First-run self-test and sample
 
@@ -179,51 +174,60 @@ rv-mailauth self-test
 ```
 
 `self-test` prints `PASS` for md5, sha1, sha256, sha512, sha3-256 and blake3 (known answers for `"abc"`), exit code
-0. It tests the hash implementations only. Then run the synthetic sample, which exercises type detection,
-duplicates, reports and the audit chain:
+0. It tests the hash implementations only. Then run the synthetic sample (16 email files, 19 items), which
+exercises DKIM and ARC with the sample's public keys, the date, hop and BEC checks, `.msg` and mbox handling,
+reports and the audit chain:
 
 ```powershell
-# portable zip (script included): self-test, sample scan, verify-log, hashes.csv vs expected_hashes.csv
+# portable zip (script included): self-test, keys show, sample analysis, verify-log, findings per item vs
+# expected_findings.json, hashes.csv vs expected_hashes.csv
 .\examples\sample\run.ps1 -Bin .\rv-mailauth.exe
 
 # installer (no script installed): run it by hand into a temporary folder
 $app = "$env:LOCALAPPDATA\Programs\Rakvor\RV MailAuth"
 $out = Join-Path $env:TEMP "rv-mailauth-check"
-rv-mailauth scan -i "$app\examples\sample\evidence" --hash sha256,md5 --out $out --progress none --no-timestamp
-$LASTEXITCODE                                  # 0
+rv-mailauth analyze -i "$app\examples\sample\evidence" --hash sha256,md5 --out $out --progress none --no-timestamp `
+  --dkim-keys "$app\examples\sample\dkim-keys.txt" --own-domain acme.example
+$LASTEXITCODE                                  # 3: the sample holds tampered messages (expected_findings.json)
 rv-mailauth verify-log (Get-ChildItem "$out\logs" | Select-Object -Last 1).FullName   # OK … chain intact
 ```
 
-<!-- forge:domain -->
-Expected summary: **3 items, 0 errors, findings high 0, medium 1, low 0, info 2**, exit code 0 (one
-`EXTENSION_MISMATCH` for `foto-vacaciones.jpg`, one `DUPLICATE` pair `acta.txt` / `acta-copia.txt`). The SHA-256
-column of `hashes.csv` must equal `examples\sample\expected_hashes.csv` (computed independently with Python):
+Expected summary: **19 items (16 files + 3 mbox messages), 0 errors, findings high 2, medium 13, low 7, info 10**,
+exit code **3** — two messages whose body no longer matches its DKIM signature (`03-body-edited.eml` and message 2
+of `12-mailbox.mbox`); the exact codes per item are in `examples\sample\expected_findings.json` and the table in
+[examples/README.md](../examples/README.md). Without `--dkim-keys` the summary differs (signatures become
+`DKIM_KEY_NOT_AVAILABLE`), so always pass the sample key file. The SHA-256 column of `hashes.csv` must equal
+`examples\sample\expected_hashes.csv` (computed independently with Python), for example:
 
 | File | Size | SHA-256 |
 | --- | --: | --- |
-| `acta-copia.txt` | 61 | `80e089ad6704c831e386b430adf92c5f5b72ec4428566d3580660e103c183c3c` |
-| `acta.txt` | 61 | `80e089ad6704c831e386b430adf92c5f5b72ec4428566d3580660e103c183c3c` |
-| `foto-vacaciones.jpg` | 112 | `42503ebb0f9892b30b72e11cfa0cbf5bcb5d60f667d611fa9598c9b4e835c643` |
+| `01-clean-rsa.eml` | 1464 | `d774e6fb20d569075f2767ee4dd92136071f6c2fa81ce0979600069b89596f59` |
+| `02-clean-ed25519.eml` | 1063 | `35736d319dd2c2b75b04a48253a5f39c4d3c2a3a65a7479b9f30bde0e1c42f1d` |
 
-`run.ps1` / `run.sh` make this comparison themselves: they read the tool's `logs\<RUN-ID>\hashes.csv` and compare
-size, SHA-256 and MD5 of every file with `expected_hashes.csv`, print
-`hashes.csv matches expected_hashes.csv (3 files: size, SHA-256, MD5)` and exit 3 on any difference. For the
-installer (no script installed), compare the table above with `$out\logs\<RUN-ID>\hashes.csv`, or run
-`python tests\verify_chain.py <log folder>` from the source tree, which re-hashes every file of `hashes.csv`.
-<!-- /forge:domain -->
+`run.ps1` / `run.sh` make both comparisons themselves: they compare every item's finding codes and status with
+`expected_findings.json` (`findings and status match expected_findings.json (19 items)`), and size, SHA-256 and
+MD5 of every file with `expected_hashes.csv` (`hashes.csv matches expected_hashes.csv (16 files: size, SHA-256,
+MD5)`), and exit 3 on any difference. For the installer (no script installed), compare `$out\logs\<RUN-ID>\hashes.csv`
+with the source tree's `expected_hashes.csv`, or run `python tests\verify_chain.py <log folder>` from the source
+tree, which re-hashes every file of `hashes.csv`.
 
 Keep the console output and the run folder as the record of this verification.
 
 ## 7. Offline and air-gapped use
 
-The **only** network access in the code is the RFC 3161 timestamp request (one HTTP POST of a 32-byte hash to the
-TSA, [src/core/src/trust.rs](../src/core/src/trust.rs)). There is no telemetry, update check or licence check.
+The network is used in two places only: the RFC 3161 timestamp request (one HTTP POST of a 32-byte hash to the
+TSA, [src/core/src/trust.rs](../src/core/src/trust.rs)), and, only with `analyze --online` (GUI: *Fetch today's DNS
+keys*), DNS TXT lookups of the missing DKIM keys `selector._domainkey.domain` through the system resolver, in the
+main process ([src/core/src/dnsfetch.rs](../src/core/src/dnsfetch.rs)); the worker processes contain no network
+code. `--online` is off by default, and each lookup reveals to the DNS which domains are examined. There is no
+telemetry, update check or licence check.
 
 | To disable the timestamp | How |
 | --- | --- |
 | One CLI run | `--no-timestamp` |
 | All CLI runs on this PC / session | `$env:RV_NO_TIMESTAMP = "1"` (or set it as a user environment variable) |
 | GUI | untick **4. Trust → Trusted timestamp** before *Start review* |
+| DKIM key lookups | never happen unless `--online` is given (GUI: *5. Options → Fetch today's DNS keys*) |
 
 An offline run with the timestamp enabled still completes: it logs `timestamp_pending` and the statistics report
 shows a warning. Later, on a machine that can reach the TSA, run `rv-mailauth timestamp <log folder>` (it
@@ -238,10 +242,10 @@ restriction is not enforced by the OS; on a connected workstation, a Windows Fir
 
 | Item | Version |
 | --- | --- |
-| Rust | Pinned by [rust-toolchain.toml](../rust-toolchain.toml): **1.97.0** with rustfmt and clippy; `rustup` installs and selects it automatically inside the source tree. `Cargo.toml` declares `rust-version = "1.88"` (edition 2024) as the minimum. To match a release exactly, use the compiler recorded in that release's `environment.json` → `tool.rustc` (e.g. `rustc 1.97.0 (2d8144b78 2026-07-07)`). |
+| Rust | Pinned by [rust-toolchain.toml](../rust-toolchain.toml): **1.99.1** with rustfmt and clippy; `rustup` installs and selects it automatically inside the source tree. `Cargo.toml` declares `rust-version = "1.98"` (edition 2024) as the minimum, set by mail-parser 1.0 ([development.md](development.md#toolchain-pin)). To match a release exactly, use the compiler recorded in that release's `environment.json` → `tool.rustc` (e.g. `rustc 1.99.1 (58cf8f9c3 2026-10-13)`). |
 | Windows linker | Visual Studio 2022 Build Tools, workload *Desktop development with C++* (MSVC + Windows SDK); target `x86_64-pc-windows-msvc`. Static CRT is set in `.cargo/config.toml`. |
 | Linux | No system packages needed to build the CLI. |
-| Optional | Python 3.12 with `blake3 jsonschema pyhanko` for the independent verifiers and the trust tests (`RV_TEST_PYTHON=python`). |
+| Optional | Python 3.12 with `blake3 jsonschema pyhanko dkimpy pynacl` for the independent verifiers, the DKIM oracle and the trust tests (`RV_TEST_PYTHON=python`). |
 
 ### Build
 
@@ -249,11 +253,11 @@ restriction is not enforced by the OS; on a connected workstation, a Windows Fir
 git clone https://github.com/Panacota96/rv-mailauth.git
 cd rv-mailauth
 git checkout v0.1.0                       # the tag of the release under review
-rustc --version                           # must print the pinned 1.97.0
+rustc --version                           # must print the pinned 1.99.1
 cargo build --release --locked -p rv-mailauth-cli -p rv-mailauth-gui
 .\target\release\rv-mailauth.exe self-test
 .\examples\sample\run.ps1 -Bin .\target\release\rv-mailauth.exe
-cargo test --workspace --locked            # unit + integration tests (trust tests skip without pyhanko)
+cargo test --workspace --locked            # unit + integration tests (trust tests skip without pyhanko, the DKIM oracle without dkimpy)
 ```
 
 ```bash
@@ -261,7 +265,7 @@ cargo test --workspace --locked            # unit + integration tests (trust tes
 cargo build --release --locked -p rv-mailauth-cli
 target/release/rv-mailauth self-test && examples/sample/run.sh target/release/rv-mailauth
 python3 tests/verify_chain.py examples/sample/out/logs/$(ls examples/sample/out/logs | tail -n 1)
-# cross-profile: a case folder written by the Python profile must verify with this build
+# cross-profile: a case folder written by the forge's Python profile must verify with this build
 python3 tests/golden/unpack.py tests/golden/case-by-python.zip.b64 /tmp/golden
 target/release/rv-mailauth verify-case /tmp/golden/CASE-GOLDEN
 ```
@@ -298,20 +302,21 @@ print("identical findings and digests" if a == b else "DIFFERENT: " + ", ".join(
 EOF
 ```
 
-The same script compares this build with the Python profile of the tool (measured identical on the sample).
+Run the sample with `--dkim-keys examples/sample/dkim-keys.txt --own-domain acme.example` on both sides.
 
 ## 9. Where things live
 
 | What | Location |
 | --- | --- |
-| Program (installer) | `%LOCALAPPDATA%\Programs\Rakvor\RV MailAuth\` (`rv-mailauth.exe`, `rv-mailauth-gui.exe`, `docs\`, `examples\sample\evidence\`, `unins000.exe`) |
+| Program (installer) | `%LOCALAPPDATA%\Programs\Rakvor\RV MailAuth\` (`rv-mailauth.exe`, `rv-mailauth-gui.exe`, `docs\`, `examples\sample\evidence\`, `examples\sample\dkim-keys.txt`, `unins000.exe`) |
 | Program (portable) | the folder you extracted |
 | PATH entry (installer task) | user environment variable `Path` (`HKCU\Environment`) |
-| Run outputs | `--out` (default `.\rakvor-out` **relative to the current folder**): `logs\<RUN-ID>\`, `reports\<RUN-ID>\`. With `--case-dir`: `<CASE>\runs\rv-mailauth\<RUN-ID>\`. The GUI uses its *Output folder* field (or the case folder) |
+| Run outputs | `--out` (default `.\rakvor-out` **relative to the current folder**): `logs\<RUN-ID>\` (with `review.jsonl` once messages are opened in the viewer), `reports\<RUN-ID>\`. With `--case-dir`: `<CASE>\runs\rv-mailauth\<RUN-ID>\`. The GUI uses its *Output folder* field (or the case folder) |
 | Case folder | wherever you create it with `--case-dir` (`case.json`, `case-log.jsonl`, `evidence\`, `runs\`) |
 | GUI settings | not persisted: each start uses the defaults; every change made before a run is recorded in that run's audit log (`ui_*`) |
 | Signing certificate | wherever you keep it; only its path, subject and SHA-256 fingerprint are logged, never the password |
-| Local data, caches, temporary files | none |
+| DKIM key files | wherever you keep them; `keys import` writes the key file you name and its own `logs\<RUN-ID>\` under `--out` |
+| Local data, caches, temporary files | none (worker processes write only into the item folders of the run) |
 
 ## 10. Uninstall
 
@@ -338,4 +343,4 @@ The same script compares this build with the Python profile of the tool (measure
 | `self-test` prints `FAIL` | Do not use this build for evidence; re-download and repeat steps 2–4. |
 | Sample summary differs from step 6 | Wrong version or modified sample files; compare `environment.json` with the release notes and the sample digests with `expected_hashes.csv`. |
 | GUI window blank or very slow on a VM | No GPU driver: software rendering is used; give the VM more CPU. |
-| Building from source downloads another compiler | Expected: rustup installs the pinned 1.97.0 from `rust-toolchain.toml`. Offline, install it beforehand (`rustup toolchain install 1.97.0 --profile minimal`). |
+| Building from source downloads another compiler | Expected: rustup installs the pinned 1.99.1 from `rust-toolchain.toml`. Offline, install it beforehand (`rustup toolchain install 1.99.1 --profile minimal`). |
