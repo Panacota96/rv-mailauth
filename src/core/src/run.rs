@@ -973,7 +973,15 @@ fn message_item(
         intake_utc: container.intake_utc.clone(),
         details: Value::Null,
         outputs: vec![],
-        message: Some(m.clone()),
+        message: Some(MboxMessageRef {
+            container_path: container.path.display().to_string(),
+            container_hashes: container
+                .hashes
+                .iter()
+                .map(|(a, h)| (a.name().to_string(), h.clone()))
+                .collect(),
+            ..m.clone()
+        }),
     };
     r.audit_first_seq = log
         .record(

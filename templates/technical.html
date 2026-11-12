@@ -20,6 +20,7 @@
   <div>{{ t.extension }}</div><div>{{ item.extension_text }}</div>
   <div>{{ t.detected_type }}</div><div>{{ item.detected_text }}</div>
   <div>{{ t.status }}</div><div>{{ item.status_label }}</div>
+  {% if item.derived_text %}<div>{{ t.mail_derived_from }}</div><div class="mono">{{ item.derived_text }}</div>{% endif %}
   {% if case %}<div>{{ t.case }}</div><div>{{ case.case_id }}</div>
   <div>{{ t.evidence_id }}</div><div class="mono">{{ item.evidence_id or t.none }}</div>
   <div>{{ t.case_registry }}</div><div>{{ item.case_status_label }}</div>

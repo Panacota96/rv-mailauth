@@ -75,6 +75,17 @@ fn findings_by_item(report_dir: &Path) -> BTreeMap<String, Vec<String>> {
     got
 }
 
+/// SHA-256 of `name` in the run's hashes.csv (index,path,size,sha256,md5,status,error).
+fn csv_sha256(log_dir: &Path, name: &str) -> String {
+    let csv = std::fs::read_to_string(log_dir.join("hashes.csv")).unwrap();
+    let line = csv
+        .lines()
+        .find(|l| l.contains(name) && !l.contains(&format!("{name}#")))
+        .unwrap();
+    let f: Vec<&str> = line.rsplitn(5, ',').collect();
+    f[3].to_string()
+}
+
 #[test]
 fn samples_give_exactly_the_expected_findings_and_dkimpy_agrees() {
     let exp = expected();
@@ -130,6 +141,32 @@ fn samples_give_exactly_the_expected_findings_and_dkimpy_agrees() {
     assert!(entries.iter().any(
         |e| e["action"] == "analysis_configured" && e["details"]["dkim_key_file"]["keys"] == 4
     ));
+    // Every mbox message cites its source (mbox digest + index + byte offset) in its technical report and
+    // custody form (JSON, HTML and PDF text).
+    let mbox_sha = csv_sha256(&s.log_dir, "12-mailbox.mbox");
+    let mut cited = 0;
+    for e in std::fs::read_dir(s.report_dir.join("items")).unwrap() {
+        let dir = e.unwrap().path();
+        if !dir.to_string_lossy().contains("12-mailbox.mbox_") {
+            continue;
+        }
+        for f in ["technical.json", "custody.json"] {
+            let j: Value =
+                serde_json::from_str(&std::fs::read_to_string(dir.join(f)).unwrap()).unwrap();
+            assert_eq!(
+                j["derived_from"]["container_hashes"]["sha256"],
+                mbox_sha.as_str(),
+                "{f}"
+            );
+            assert!(j["derived_from"]["message_offset"].as_u64().unwrap() > 0);
+        }
+        for f in ["technical.en.html", "custody.en.html", "custody.es.html"] {
+            let h = std::fs::read_to_string(dir.join(f)).unwrap();
+            assert!(h.contains(&mbox_sha), "{f} does not cite the mbox digest");
+        }
+        cited += 1;
+    }
+    assert_eq!(cited, 3);
     // hashes.csv lists the messages (path = <mbox>#<n>@<offset>) after their mbox.
     let csv = std::fs::read_to_string(s.log_dir.join("hashes.csv")).unwrap();
     assert_eq!(csv.lines().filter(|l| l.contains(".mbox#")).count(), 3);

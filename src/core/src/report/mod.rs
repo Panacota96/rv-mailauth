@@ -407,7 +407,40 @@ fn item_view(c: &Catalog, it: &ItemResult) -> Value {
         "audit_first_seq": it.audit_first_seq, "audit_last_seq": it.audit_last_seq,
         "evidence_id": it.evidence_id, "intake_utc": it.intake_utc, "case_status": it.case_status,
         "case_status_label": it.case_status.as_ref().map(|s| c.label(&format!("case_status_{}", s))),
+        "derived_text": derived_text(c, it),
     })
+}
+
+/// For one message of an mbox: the citation of its source (mbox path and digests, index, byte offsets).
+pub fn derived_text(c: &Catalog, it: &ItemResult) -> Option<String> {
+    let m = it.message.as_ref()?;
+    let mut p = BTreeMap::new();
+    p.insert("n".to_string(), m.n.to_string());
+    p.insert("container".to_string(), m.container_path.clone());
+    p.insert(
+        "hashes".to_string(),
+        m.container_hashes
+            .iter()
+            .map(|(a, h)| format!("{a} {h}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    p.insert("offset".to_string(), m.message_offset.to_string());
+    p.insert("length".to_string(), m.length.to_string());
+    p.insert("separator".to_string(), m.offset.to_string());
+    Some(crate::i18n::fill(&c.label("mail_derived_text"), &p))
+}
+
+/// Language-neutral citation of the source of an mbox message (technical and custody JSON).
+fn derived_json(it: &ItemResult) -> Value {
+    match &it.message {
+        Some(m) => {
+            json!({"container": m.container_path, "container_hashes": m.container_hashes, "n": m.n,
+                          "separator_offset": m.offset, "message_offset": m.message_offset, "length": m.length,
+                          "id": m.id})
+        }
+        None => Value::Null,
+    }
 }
 
 pub fn item_context(lang: &str, run: &RunInfo, it: &ItemResult, audit: &AuditRef) -> Value {
@@ -526,6 +559,7 @@ pub fn technical_json(run: &RunInfo, it: &ItemResult) -> Value {
         "limitations": LIMITATIONS,
         "audit": {"first_seq": it.audit_first_seq, "last_seq": it.audit_last_seq},
         "email": mailview::mail_json(it),
+        "derived_from": derived_json(it),
     })
 }
 
@@ -780,6 +814,9 @@ pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         (t("detected_type"), s(ctx, "item.detected_text")),
         (t("status"), s(ctx, "item.status_label")),
     ];
+    if !s(ctx, "item.derived_text").is_empty() {
+        rows.push((t("mail_derived_from"), s(ctx, "item.derived_text")));
+    }
     if ctx["case"].is_object() {
         rows.push((t("case"), s(ctx, "case.case_id")));
         rows.push((
@@ -940,6 +977,7 @@ pub fn custody_json(run: &RunInfo, it: &ItemResult) -> Value {
         "intake_utc": it.intake_utc,
         "item": {"index": it.index, "path": it.path.display().to_string(), "file_name": it.file_name(), "size": it.size},
         "hashes": it.hashes.iter().map(|(a, h)| (a.name().to_string(), json!(h))).collect::<serde_json::Map<_, _>>(),
+        "derived_from": derived_json(it),
         "examiner": run.actor,
         "operations": [{"tool": run.tool_name, "version": run.tool_version, "start_utc": run.started_utc, "end_utc": run.finished_utc,
                         "audit_first_seq": it.audit_first_seq, "audit_last_seq": it.audit_last_seq}],
@@ -1020,6 +1058,9 @@ pub fn custody_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         }
         if !c("intake_utc").is_empty() {
             rows.insert(2, (c("intake_date"), c("intake_utc")));
+        }
+        if !s(ctx, "item.derived_text").is_empty() {
+            rows.push((t("mail_derived_from"), s(ctx, "item.derived_text")));
         }
     }
     finish(ctx, &c("title"), &b, run)

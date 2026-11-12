@@ -122,7 +122,9 @@
     "mail_mbox_message": "Message in mbox",
     "mail_mbox_messages": "Messages in this mbox",
     "mail_not_completed": "The message analysis did not complete.",
-    "mail_none": "none"
+    "mail_none": "none",
+    "mail_derived_from": "Derived from (mbox evidence)",
+    "mail_derived_text": "Message #%{n} of the mbox %{container} (%{hashes}), stored from byte offset %{offset}, %{length} bytes (separator line at offset %{separator}). The custody of these bytes is the custody of that mbox file."
   },
   "severity": {
     "high": "High",

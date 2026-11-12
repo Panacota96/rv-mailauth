@@ -149,6 +149,10 @@ pub struct MboxMessageRef {
     /// The separator line itself, without line ending (capped at 200 characters).
     pub from_line: String,
     pub id: String,
+    /// The mbox the message comes from (the registered evidence) and its digests from this run's hashing
+    /// pass, so every derived message item cites its source: mbox hash + index + byte offset.
+    pub container_path: String,
+    pub container_hashes: BTreeMap<String, String>,
 }
 
 /// Which bytes of the evidence the worker analyses.

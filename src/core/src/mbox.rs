@@ -112,6 +112,7 @@ pub fn scan<R: Read>(mut r: R, path_id: &str, max: u64) -> std::io::Result<Scan>
             length: end.saturating_sub(*body_start),
             from_line: fl.chars().take(FROM_LINE_CAP).collect(),
             id: format!("{}#{}@{}", path_id, i + 1, off),
+            ..MboxMessageRef::default()
         });
     }
     Ok(Scan {

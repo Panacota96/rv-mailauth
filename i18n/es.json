@@ -122,7 +122,9 @@
     "mail_mbox_message": "Mensaje en mbox",
     "mail_mbox_messages": "Mensajes en este mbox",
     "mail_not_completed": "El análisis del mensaje no terminó.",
-    "mail_none": "ninguno"
+    "mail_none": "ninguno",
+    "mail_derived_from": "Derivado de (evidencia mbox)",
+    "mail_derived_text": "Mensaje n.º %{n} del mbox %{container} (%{hashes}), almacenado desde el byte %{offset}, %{length} bytes (línea separadora en el byte %{separator}). La cadena de custodia de estos bytes es la del archivo mbox."
   },
   "severity": {
     "high": "Alta",

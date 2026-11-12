@@ -122,7 +122,9 @@
     "mail_mbox_message": "Message dans le mbox",
     "mail_mbox_messages": "Messages dans ce mbox",
     "mail_not_completed": "L'analyse du message n'a pas abouti.",
-    "mail_none": "aucun"
+    "mail_none": "aucun",
+    "mail_derived_from": "Issu de (scellé mbox)",
+    "mail_derived_text": "Message n° %{n} du mbox %{container} (%{hashes}), stocké à partir de l'octet %{offset}, %{length} octets (ligne de séparation à l'octet %{separator}). La garde de ces octets est celle du fichier mbox."
   },
   "severity": {
     "high": "Élevée",

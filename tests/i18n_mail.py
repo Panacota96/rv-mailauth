@@ -295,6 +295,11 @@ LABELS = {
     "mail_mbox_messages": ("Messages in this mbox", "Mensajes en este mbox", "Messages dans ce mbox"),
     "mail_not_completed": ("The message analysis did not complete.", "El análisis del mensaje no terminó.", "L'analyse du message n'a pas abouti."),
     "mail_none": ("none", "ninguno", "aucun"),
+    "mail_derived_from": ("Derived from (mbox evidence)", "Derivado de (evidencia mbox)", "Issu de (scellé mbox)"),
+    "mail_derived_text": (
+        "Message #%{n} of the mbox %{container} (%{hashes}), stored from byte offset %{offset}, %{length} bytes (separator line at offset %{separator}). The custody of these bytes is the custody of that mbox file.",
+        "Mensaje n.º %{n} del mbox %{container} (%{hashes}), almacenado desde el byte %{offset}, %{length} bytes (línea separadora en el byte %{separator}). La cadena de custodia de estos bytes es la del archivo mbox.",
+        "Message n° %{n} du mbox %{container} (%{hashes}), stocké à partir de l'octet %{offset}, %{length} octets (ligne de séparation à l'octet %{separator}). La garde de ces octets est celle du fichier mbox."),
 }
 
 METHOD = (
