@@ -1,219 +1,243 @@
-<!--
-  Template note for the docs agent of a tool scaffolded from rv-mailauth:
-  sections between forge:domain markers describe what THIS tool does (inventory, file types, duplicates,
-  intake role) and must be rewritten for the new tool. Everything outside the markers (hashing, audit chain,
-  case folder, RFC 3161, signed PDFs, custody forms, determinism) is shared code: keep it, and re-check the
-  numbers against the code. The scaffold replaces the tool name everywhere, so re-read any sentence that
-  names the intake tool.
--->
-
 # Theory of operation
 
 This page explains **why** each step of RV MailAuth works, at two levels:
 
 - **[Part A — For clients, lawyers and judges](#part-a--for-clients-lawyers-and-judges)**: plain language,
-  analogies and pictures. No knowledge of computing or cryptography is needed.
+  analogies and pictures. No knowledge of email systems or cryptography is needed.
 - **[Part B — For examiners and opposing experts](#part-b--for-examiners-and-opposing-experts)**: algorithms,
   data structures, exact constants, the source file that implements each one, and the standards behind them.
-  Every number in Part B is taken from the code of this commit or computed for this page with the tool itself;
-  where the code and a standard or another page differ, Part B says so.
+  Every number in Part B is taken from the code of this commit or from the synthetic sample
+  ([examples/](../examples/README.md)) run with the tool itself; where the code and a standard differ, Part B says
+  so.
 
 It describes what the tool **does**, not what it should do. Known weaknesses are stated where they apply and
 collected in [admissibility.md](admissibility.md#consolidated-gap-list). How to run the tool:
-[usage.md](usage.md). How to install and verify it: [installation.md](installation.md).
+[usage.md](usage.md). The exact wording of every finding: [reports.md](reports.md#findings-catalogue).
 
 ## Contents
 
 - Part A: [A1 What the tool is](#a1-what-the-tool-is-and-is-not) ·
   [A2 Digital fingerprints](#a2-digital-fingerprints-hashes) ·
-  [A3 Two fingerprints, one reading](#a3-two-fingerprints-one-reading) ·
-  [A4 What a file really is](#a4-what-a-file-really-is-its-first-bytes) ·
-  [A5 Identical copies](#a5-identical-copies) ·
-  [A6 The case folder](#a6-the-case-folder-one-register-for-the-whole-case) ·
-  [A7 The tool's own diary](#a7-the-tools-own-diary-the-audit-log) ·
-  [A8 Proving when](#a8-proving-when-trusted-timestamps) ·
-  [A9 Signed reports](#a9-signed-reports) ·
-  [A10 Custody forms](#a10-custody-forms) ·
-  [A11 Reading a clean result](#a11-what-no-findings-means)
+  [A3 What DKIM is](#a3-what-dkim-is-a-wax-seal-on-the-envelope) ·
+  [A4 What a body hash shows](#a4-what-a-body-hash-shows) ·
+  [A5 Why keys rotate](#a5-why-the-key-matters-and-why-keys-rotate) ·
+  [A6 ARC](#a6-arc-seals-added-by-forwarders) ·
+  [A7 Received headers](#a7-received-headers-the-postmarks) ·
+  [A8 BEC signals](#a8-business-email-compromise-bec-signals) ·
+  [A9 Outlook files and mailboxes](#a9-outlook-files-and-mailboxes) ·
+  [A10 The tool's own diary](#a10-the-tools-own-diary-the-audit-log) ·
+  [A11 Proving when](#a11-proving-when-trusted-timestamps) ·
+  [A12 Signed reports and custody forms](#a12-signed-reports-and-custody-forms) ·
+  [A13 What "no findings" means](#a13-what-no-findings-means)
 - Part B: [B1 Source map](#b1-source-map-and-constants) ·
-  [B2 Pipeline](#b2-pipeline-and-reads-of-the-evidence) ·
+  [B2 Pipeline and isolation](#b2-pipeline-worker-isolation-and-reads-of-the-evidence) ·
   [B3 Hashing](#b3-single-pass-dual-hashing) ·
-  [B4 Type detection](#b4-type-detection-by-magic-bytes-and-extension-mismatch) ·
-  [B5 Duplicates](#b5-duplicate-detection-by-digest) ·
-  [B6 Audit chain](#b6-the-audit-hash-chain) ·
-  [B7 Case folder](#b7-the-case-folder) ·
-  [B8 RFC 3161](#b8-rfc-3161-trusted-timestamp) ·
-  [B9 Signed reports](#b9-signed-pdf-reports) ·
-  [B10 Custody forms](#b10-custody-forms) ·
-  [B11 Determinism](#b11-determinism-and-repeatability) ·
-  [B12 What findings do not prove](#b12-what-each-finding-does-not-prove) ·
-  [B13 References](#b13-references)
+  [B4 Canonicalisation](#b4-dkim-canonicalisation) ·
+  [B5 bh= and b=](#b5-the-body-hash-bh-and-the-header-signature-b) ·
+  [B6 Offline keys](#b6-offline-key-injection-and-the-online-mode) ·
+  [B7 ARC](#b7-arc) ·
+  [B8 Hops and clock skew](#b8-received-hop-ordering-dates-and-clock-skew) ·
+  [B9 Organisational domain](#b9-organisational-domain-from-the-public-suffix-list) ·
+  [B10 Lookalikes](#b10-lookalike-domains-and-confusable-skeletons) ·
+  [B11 Other BEC rules](#b11-reply-to-return-path-display-name-and-payment-wording) ·
+  [B12 .msg and mbox](#b12-outlook-msg-and-mbox) ·
+  [B13 Audit chain](#b13-the-audit-hash-chain) ·
+  [B14 Case folder](#b14-the-case-folder) ·
+  [B15 RFC 3161](#b15-rfc-3161-trusted-timestamp) ·
+  [B16 Signed reports](#b16-signed-pdf-reports) ·
+  [B17 Custody forms](#b17-custody-forms) ·
+  [B18 Determinism](#b18-determinism-and-repeatability) ·
+  [B19 References](#b19-references)
 
 ---
 
 # Part A — For clients, lawyers and judges
 
-<!-- forge:domain -->
 ## A1 What the tool is (and is not)
 
-RV MailAuth is the **intake desk** of a digital investigation. Before anyone examines a file, the tool writes down
-what was received: every file's exact digital fingerprint, its size, what kind of file it really is, and whether
-anything looks wrong (a photo that is really a PDF, a program hidden under another name, an empty file, two
-identical copies). In a case folder it gives each file an evidence number (`E0001`, `E0002`, …) so that every
-later tool can prove it looked at exactly the same bytes.
-
-It never says "this file is genuine" or "this file is fake". Each observation is written as a **finding** that
-says, in plain words, **what it shows** and **what it does not prove**. The conclusion belongs to a human
-examiner.
+RV MailAuth examines emails saved as files — `.eml` (the standard internet format), Outlook `.msg`, and `.mbox`
+mailboxes — and lists **signals** that a message was changed after it was sent, or is not what it claims to be.
+It is a magnifying glass for an examiner, not a judge: it never says "authentic" or "forged".
 
 ```mermaid
 flowchart LR
-    S[("Source<br/>(phone, laptop, export)")] -->|forensic copy| C[("Verified copy")]
-    C -->|read only| T["RV MailAuth<br/>intake"]
-    T --> F["Findings<br/>what it shows / what it does not prove"]
-    T --> R[["Evidence register<br/>E0001, E0002, …"]]
-    T --> L[("Audit log<br/>every step, sealed")]
-    R --> A["Later tools<br/>re-check each file"]
-    F --> E["Examiner's opinion"]
-    L --> E
+    E[("Email file<br/>(.eml, .msg, .mbox)")] --> T["RV MailAuth<br/>reads, never writes"]
+    K["Public keys supplied<br/>by the examiner"] --> T
+    T --> S["Signals<br/>(each says what it shows<br/>and what it does not prove)"]
+    T --> D["Diary of every step<br/>(audit log)"]
+    S --> X["Examiner's opinion"]
+    D --> X
 ```
 
-| The tool can tell you | The tool cannot tell you |
+| It tells you | It does not tell you |
 | --- | --- |
-| The exact fingerprint of every file it received, and that later copies are identical | That the copy it received equals the original source |
-| That a file's content does not match its name (e.g. a PDF called `.jpg`) | Why it was renamed, or by whom |
-| That two files have identical content | Who copied them, or when |
-| Every action it performed, in a log that shows any later edit | Whether the workstation's clock was right |
-<!-- /forge:domain -->
+| Whether the text of the message is the one a mail server signed (DKIM), when the right key is supplied | Who typed the message, or whether its content is true |
+| Whether the server postmarks (Received headers) and the dates are consistent with each other | That an unsigned header was never edited |
+| Whether a sender's domain imitates your organisation's, or replies are steered elsewhere | That anyone intended to deceive |
+| A fingerprint of every file, attachment and report, in a diary that shows any later edit | What happened to the message before it reached the examiner |
 
 ## A2 Digital fingerprints (hashes)
 
 A **hash** is a short code computed from every byte of a file — a fingerprint. Change one character and the
-fingerprint changes completely; keep the file identical and the fingerprint is the same on any computer, with any
-correct program.
+fingerprint changes completely; keep the file identical and the fingerprint is the same on any computer.
 
-Real example (SHA-256), using the sample file `examples/sample/evidence/acta.txt` (61 bytes):
-
-| Text (last line of the file) | SHA-256 fingerprint |
+| Text | SHA-256 fingerprint |
 | --- | --- |
-| `Firmado: Ana Ruiz` | `80e089ad6704c831e386b430adf92c5f5b72ec4428566d3580660e103c183c3c` |
-| `Firmado: Ana Ruis` | `590570db76a9735f7b3782c73679fc6af6ac4041be4c41bcba1df0b648115523` |
+| `Importe: 1.200 EUR` | `5de4190be0c23f20e28ab9c4c88bf7c0786d68dce61119b222f96bbf7e015857` |
+| `Importe: 12.000 EUR` | `b1e35a54a6ec76e1480c8c9e1739bd1271b6cb901836deb40ad296ecf513992e` |
 
-One letter differs; the two fingerprints share nothing recognisable. This is why a hash proves that a file was
-**not** changed: if today's fingerprint equals the one written down at intake, the file is the same, bit for bit.
+One extra digit; the two fingerprints share nothing recognisable. The tool fingerprints every evidence file (one
+or two methods, read once), every attachment and every report it writes.
 
-## A3 Two fingerprints, one reading
+## A3 What DKIM is: a wax seal on the envelope
 
-The examiner may choose **one or two** fingerprint methods (for example SHA-256, the modern standard, plus MD5,
-which older case files often use). The tool reads each file **once** and feeds every piece it reads to both
-methods at the same time, like a cashier who scans each item once while two tills add it up. Both fingerprints
-therefore describe exactly the same bytes. More than two methods at once are refused, so that the work stays
-fast on very large folders.
-
-<!-- forge:domain -->
-## A4 What a file really is: its first bytes
-
-The name of a file (`holiday.jpg`) is a label anyone can change. The **first bytes** of the content are harder to
-fake by accident: most formats start with a fixed "signature" — PDF documents start with `%PDF-`, JPEG photos with
-the bytes `FF D8 FF`, Windows programs with `MZ`. The tool compares the label with the signature.
-
-The sample `foto-vacaciones.jpg` ("holiday photo") starts with `%PDF-1.4`: it is a PDF renamed as a photo, so the
-tool reports *Extension does not match content*. A program hidden under a document name is reported with higher
-severity, because opening it could run it.
-
-Limits a court should know: the tool knows 15 common signatures (unknown types are reported as unknown, not as
-suspicious); a file without an extension is not compared; and some signatures are very short (2 bytes), so an
-ordinary text that happens to start with `MZ` would be reported as a program.
-
-## A5 Identical copies
-
-When two files have the same fingerprint, their contents are identical, whatever their names. The tool groups
-them and reports *Duplicate content*. In the sample, `acta.txt` and `acta-copia.txt` are one such pair. A
-duplicate is information, not a problem: copies are normal. It does not say which copy came first.
-<!-- /forge:domain -->
-
-## A6 The case folder: one register for the whole case
-
-In a real case several Rakvor tools work one after the other. They share **one case folder**, which holds a
-register of the evidence. The intake tool writes each file into it once, with its fingerprints and an evidence
-number. Every later tool, before examining a file, takes its fingerprint again and compares it with the register:
-same fingerprint, same evidence; different fingerprint, a high-severity warning.
+When a company's mail server sends a message, it can add a **DKIM signature**: a seal computed with a secret key
+that only that server holds. Anyone can check the seal with the matching **public key**, which the company
+publishes in the internet's address book (the DNS). If the seal checks out, the sealed parts of the message — the
+text and the header lines the server chose to seal (usually From, To, Subject, Date) — are exactly as they were
+when the server sealed them.
 
 ```mermaid
-flowchart LR
-    I["Intake tool"] -->|"writes once"| R[["Register<br/>E0001 · E0002 · E0003"]]
-    R -->|"compare fingerprints"| A1["Analysis tool 1"]
-    R -->|"compare fingerprints"| A2["Analysis tool 2"]
-    I --> J[("Case diary<br/>who worked on the case, when")]
-    A1 --> J
-    A2 --> J
+sequenceDiagram
+    participant S as Sender's mail server<br/>(holds the secret key)
+    participant M as The message
+    participant R as Anyone, later<br/>(holds the public key)
+    S->>M: seal = sign(body fingerprint + chosen headers)
+    Note over M: travels, is stored, is exported
+    R->>M: recompute the fingerprints
+    R->>R: does the seal match, with the public key?
 ```
 
-The case folder also keeps a **case diary** in which every tool notes when it started and finished and the final
-seal of its own diary (A7). The two diaries quote each other, so one cannot be edited without breaking the other.
+What a valid seal shows: someone holding the domain's secret key sealed **this** text and **these** headers.
+What it does not show: who wrote the message, that the display name is honest, that headers outside the seal are
+original, or that the account was not hijacked. A message without a seal proves nothing either way: many servers
+do not seal.
 
-## A7 The tool's own diary (the audit log)
+## A4 What a body hash shows
+
+The seal contains two parts. The first is a **fingerprint of the message text** (the *body hash*), written in
+plain sight inside the signature. Checking it needs **no key at all**: recompute the fingerprint of the text as
+it is now and compare.
+
+In the sample message `03-body-edited.eml`, the supplier confirmed an order of **1.200 EUR**; the file now says
+**12.000 EUR**. The signature still carries the fingerprint of the original text, so the comparison fails:
+
+| | Body fingerprint (base64) |
+| --- | --- |
+| Written in the signature (`bh=`) | `uqPtfB1CezqNNoVfV2hm8du1wqW1+2JyxpqcXZnnTmc=` |
+| Computed from the text as it is now | `Ky2onvEV9rkPdCyUMSKq0VAu3k6IitBlzBGFVntB2Mo=` |
+
+This is the tool's only high-severity email signal (`DKIM_BODY_HASH_MISMATCH`). It shows that the text is not
+the one that was sealed. It does not show who changed it or why: mailing lists, antivirus footers and some mail
+programs also change text after sealing.
+
+## A5 Why the key matters, and why keys rotate
+
+The second part of the seal covers the sealed headers and the body fingerprint, and checking it needs the
+company's **public key**. Companies replace their keys from time to time (*rotation*) and remove old ones from
+the DNS. So:
+
+- with the key that was published **when the message was sent**, a failure means sealed headers changed;
+- with **today's** key, a genuine old message can fail simply because the key changed — the result is the same
+  as for an edited header, and the tool cannot tell the two apart.
+
+That is why RV MailAuth works **offline by default**: the examiner supplies the keys (from an archived copy of
+the DNS, the provider, or a passive-DNS service), the tool records the key file's fingerprint, and nothing is
+asked of the internet. If the examiner chooses `--online`, the missing keys are fetched from today's DNS, every
+lookup is written to the diary, and each result based on such a key is flagged as **weaker evidence**
+(`DKIM_KEY_FROM_CURRENT_DNS`).
+
+## A6 ARC: seals added by forwarders
+
+Forwarding services and mailing lists often change a message (a footer, a new subject), which breaks the
+original seal. **ARC** lets each of them add its own numbered seal saying "this is what I received and what the
+original checks said". The tool verifies the ARC chain with the keys supplied; a broken chain can mean an
+intermediary broke it, or simply that the forwarders' keys were not supplied.
+
+## A7 Received headers: the postmarks
+
+Every server that handles a message stamps a **Received** line at the top: "from X, by Y, at this time". Read
+from the bottom up, they trace the route; **hop 1** is the server closest to the sender.
+
+```mermaid
+flowchart BT
+    H1["hop 1: laptop → smtp.example.org<br/>11:00:00 +0100 (10:00:00 UTC)"] --> H2["hop 2: smtp.example.org → mx.acme.example<br/>10:00:02 +0000"]
+    H2 --> I["recipient's mailbox"]
+```
+
+Postmarks written by the recipient's own servers are reliable as far as those servers are; postmarks lower down
+were written by servers the recipient does not control, and **anyone holding the file can type new lines**. The
+tool checks that the times go forward (allowing a small clock difference, 5 minutes by default), that the Date
+the sender's computer wrote is not later than the first postmark, and that the time zones agree. Each
+inconsistency is a signal, never proof: server clocks drift and some servers stamp oddly.
+
+## A8 Business email compromise (BEC) signals
+
+In a BEC fraud, a criminal impersonates a supplier or a manager to divert a payment. The tool looks for the usual
+tricks, compared with your organisation's own domains (`--own-domain`):
+
+| Signal | Example from the sample |
+| --- | --- |
+| **Lookalike domain** — a domain built to be read as yours | `acrne.example` ("r" + "n" reads as "m") imitating `acme.example` |
+| **Replies diverted** — Reply-To or Return-Path at another organisation than From | From `@example.org`, Reply-To `bruno.proveedor@example.net` |
+| **Display-name spoofing** — the name shows your organisation, the address is external | "ACME - Dirección Financiera" `<direccion.financiera@example.net>` |
+| **Payment details mentioned** — bank details, IBAN, "new account", in English, Spanish or French | "bank details have changed" with a valid IBAN test number |
+
+These are pointers for review. Each has innocent explanations (help desks, partners, ordinary invoices), stated in
+every finding.
+
+## A9 Outlook files and mailboxes
+
+An Outlook **.msg** file is not the message as it travelled: Outlook re-encodes the text and attachments and keeps
+the original header lines only sometimes. The seal can therefore not be checked on a .msg; the tool says
+"not evaluated", never "failed", and asks for the original message when the seal matters.
+
+An **mbox** is one file holding many messages one after another. The tool fingerprints the mbox as the evidence,
+then treats each message as an item **derived** from it, identified by its number and its exact position (byte
+offset) in the mbox — so anyone can cut out the same bytes and check them.
+
+## A10 The tool's own diary (the audit log)
 
 Everything the tool does is written to a diary, `audit.jsonl`. Each line carries the seal (hash) of the line
 before it, like numbered pages where every page quotes the seal of the previous page. Editing, inserting,
-deleting or reordering a page breaks the seals from that point on, and `rv-mailauth verify-log` (or an independent
-Python script) detects it.
+deleting or reordering a page breaks the seals from that point on, and `rv-mailauth verify-log` (or an
+independent Python script) detects it. When an examiner later opens a message in the desktop app, that is
+written to a second diary, `review.jsonl`, whose first page quotes the last page of the run's diary.
 
 ```mermaid
 flowchart LR
     G["start<br/>000…000"] --> E1["#1 run started<br/>seal 6db9fbe2…"]
-    E1 --> E2["#2 3 files found<br/>quotes 6db9fbe2…<br/>seal 4c78f96c…"]
-    E2 --> E3["#3 acta.txt hashed<br/>quotes 4c78f96c…"]
-    X["someone edits #2:<br/>3 files becomes 2"] -.->|"seal becomes f6a7e0fc…<br/>#2 no longer matches"| E2
+    E1 --> E2["#2 inputs found<br/>quotes 6db9fbe2…<br/>seal 4c78f96c…"]
+    E2 --> E3["#3 file hashed<br/>quotes 4c78f96c…"]
+    X["someone edits #2"] -.->|"seal changes,<br/>#3 no longer matches"| E2
 ```
 
 One honest limit: if the **last** pages are torn out, the remaining pages still agree with each other. That is
-why the diary's final seal is also written in the case diary, printed in the reports and sent to a notary (A8).
+why the diary's final seal is also written in the case diary, printed in the reports and sent to a notary (A11).
 
-## A8 Proving when: trusted timestamps
+## A11 Proving when: trusted timestamps
 
 The diary proves its own consistency, not *when* it was written. For that, the tool sends the latest seal to a
-**time-stamping authority** — an independent online notary — which signs "I saw this seal at 15:30:01 UTC on
-21 October 2026". The notary never sees the evidence, only a 32-byte seal.
+**time-stamping authority** — an independent online notary — which signs "I saw this seal at 15:30:01 UTC". The
+notary never sees the evidence, only a 32-byte seal. Without internet the run still finishes; the receipt can be
+requested later with `rv-mailauth timestamp`. A timestamp proves the diary existed at that time — not that its
+content is true, and not when the email itself was sent.
 
-```mermaid
-sequenceDiagram
-    participant T as RV MailAuth
-    participant N as Time-stamping authority (notary)
-    T->>N: latest seal of the diary (32 bytes)
-    N-->>T: signed receipt "seen at 2026-10-21 15:30:01 UTC"
-    Note over T: receipt stored next to the diary (timestamp-NNNNN.tsr)
-```
+## A12 Signed reports and custody forms
 
-Without internet the run still finishes; the receipt can be requested later with `rv-mailauth timestamp`. A
-timestamp proves the diary existed at that time — not that its content is true.
-
-## A9 Signed reports
-
-With the examiner's certificate, every PDF report is digitally signed, so any later change to a report is
-detectable with Adobe Reader or another validator. The HTML and JSON reports are not signed, but their
-fingerprints are written in the diary, which is timestamped.
-
-## A10 Custody forms
-
-For every file the tool pre-fills a **chain-of-custody form** — Colombian style (Spanish) or French style (French),
+With the examiner's certificate, every PDF report is digitally signed, so any later change is detectable with
+Adobe Reader or another validator; the HTML and JSON reports are bound by their fingerprints in the diary. For
+every item the tool pre-fills a **chain-of-custody form** — Colombian style (Spanish) or French style (French),
 always with an English copy — with the case number, the evidence number, the fingerprints and the times of the
-work, and leaves empty rows for the people who hand over and receive the evidence to sign. It is an internal
-record that accompanies, but does not replace, the official form of the police, prosecutor or court.
+work. It accompanies, but does not replace, the official form of the police, prosecutor or court.
 
-<!-- forge:domain -->
-## A11 What "no findings" means
+## A13 What "no findings" means
 
-A file without findings is **not** proven authentic. It only means that the checks this tool applies found
-nothing. Every report prints these limitations:
-
-- Type detection uses a limited table of common file signatures; unknown types are reported as unknown, not as
-  suspicious.
-- Modification times come from the file system of the examined copy and may differ from the original source.
-- A result without findings does not prove that a file is authentic or unaltered before acquisition.
-- A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that
-  the examined copy matches the original source.
-<!-- /forge:domain -->
+A message without findings is **not** proven authentic: the checks found nothing, and careful forgeries can leave
+nothing for them to find. Every report prints the limitations listed in
+[reports.md](reports.md#limitations-printed-in-every-report): DKIM needs the key valid at sending time; a missing
+signature proves nothing; headers are claims; `.msg` files lack the original message; mbox un-escaping can be
+ambiguous; BEC checks have false positives; a timestamp proves existence only.
 
 ---
 
@@ -223,197 +247,307 @@ nothing. Every report prints these limitations:
 
 | Process | Implementation | Key constants (value in this commit) |
 | --- | --- | --- |
-| Input collection | [src/core/src/input.rs](../src/core/src/input.rs) | folders 1 level unless `--recursive`; symbolic links never followed; paths made absolute and lexically normalised, de-duplicated, sorted by that string bytewise (UTF-8; same rule as the Python profile), numbered from 1; a UTF-8 BOM at the start of an `--input-list` file is ignored |
-| Log verification | [src/core/src/verify.rs](../src/core/src/verify.rs) | chain + timestamps + truncation anchors (timestamp `covers_seq`, case log `run_finished`) |
-| Hashing | [src/core/src/hash.rs](../src/core/src/hash.rs) | `CHUNK` = 1 MiB (1 048 576 bytes); `MAX_SELECTED` = 2; head kept for detection = first 4 096 bytes; known answers for `"abc"` |
-| Pipeline | [src/core/src/run.rs](../src/core/src/run.rs) | progress events every 150 ms; run id = `YYYYMMDDTHHMMSSZ-` + 6 hex of SHA-256(clock, pid, host) |
-| Audit chain | [src/core/src/audit.rs](../src/core/src/audit.rs), [tests/verify_chain.py](../tests/verify_chain.py) | genesis = 64 zeros; SHA-256 over canonical JSON |
-| Case folder | [src/core/src/case.rs](../src/core/src/case.rs) | schemas `rakvor.case/1`, `rakvor.registry/1`; lock wait 30 s; stale lock 600 s; ids `E%04d` |
-| Timestamp, report signing | [src/core/src/trust.rs](../src/core/src/trust.rs) | default TSA `http://timestamp.digicert.com`; HTTP timeout 15 s; response ≤ 1 MiB; nonce 8 bytes |
-| PDF writer | [src/core/src/report/pdf.rs](../src/core/src/report/pdf.rs) | A4 595 × 842 pt; signature placeholder 16 384 bytes |
-| Reports | [src/core/src/report/mod.rs](../src/core/src/report/mod.rs) | duplicate partners listed ≤ 10, duplicate paths ≤ 20 per group; 6 blank custody transfer rows; item folder name ≤ 60 characters |
-| Environment record | [src/core/src/env.rs](../src/core/src/env.rs), [src/core/build.rs](../src/core/build.rs) | compiler, target and every `Cargo.lock` package embedded at build time; product version from `version.txt` |
+| Input collection | [input.rs](../src/core/src/input.rs) | folders 1 level unless `--recursive`; symbolic links never followed; paths absolute, lexically normalised, de-duplicated, sorted bytewise (UTF-8), numbered from 1 |
+| Hashing | [hash.rs](../src/core/src/hash.rs) | `CHUNK` = 1 MiB; at most 2 algorithms; first 4 096 bytes kept for classification |
+| Routing | [analyzer.rs](../src/core/src/analyzer.rs) | `classify(name, first 4 KiB)`: OLE signature `D0 CF 11 E0 A1 B1 1A E1` → Msg if named `.msg`, else inventoried (a `.doc` is not an email); first line `From ` → Mbox; else by extension (`.msg` Msg, `.mbox`/`.mbx` Mbox, `.eml` Eml); else RFC 5322 header lines → Eml; anything else → the inventory logic (type, extension mismatch, empty, executable) |
+| Worker isolation | [worker.rs](../src/core/src/worker.rs) | protocol `rv-mailauth-worker/1`; defaults `--worker-timeout` 120 s, `--worker-memory-mb` 1024; stdout ≤ 64 MiB; last 4 KiB of stderr kept |
+| One message | [mail.rs](../src/core/src/mail.rs) | `--max-message-mb` 200; caps: 100 hops, 50 recipients, 200 attachments, 20 signatures, 20 Authentication-Results, raw values 998 characters, text scanned for payment wording ≤ 1 MiB |
+| DKIM / ARC | [dkim.rs](../src/core/src/dkim.rs), [dnsfetch.rs](../src/core/src/dnsfetch.rs) | mail-auth 0.15.1 (rust-crypto); offline resolver with no name server; key names `selector._domainkey.domain` |
+| Dates | [mail.rs](../src/core/src/mail.rs) `date_findings` | `--clock-skew` 300 s (0–86 400); zone valid if \|offset\| ≤ 14 h and a multiple of 15 min |
+| BEC | [bec.rs](../src/core/src/bec.rs) | edit distance ≤ 2 for labels of ≥ 4 characters; 33 payment terms (EN/ES/FR) + IBAN mod-97 check |
+| Organisational domain | [psl.rs](../src/core/src/psl.rs), [data/](../src/core/data/PSL_VERSION.txt) | Public Suffix List version `2026-11-10_11-23-57_UTC`, 10 414 rules, SHA-256 `b726c024…5ebee` |
+| .msg | [msg.rs](../src/core/src/msg.rs) | MAPI tags 0x007D transport headers, 0x0037 subject, 0x0039 submit time, 0x0E06 delivery time, 0x1000 body, 0x1035 Message-ID, 0x3701 attachment data |
+| mbox | [mbox.rs](../src/core/src/mbox.rs) | `--mbox-variant` mboxrd (default) or mboxo; `--max-mbox-messages` 50 000; id `<path>#<n>@<offset>` |
+| Audit chain, review log | [audit.rs](../src/core/src/audit.rs), [review.rs](../src/core/src/review.rs), [verify.rs](../src/core/src/verify.rs) | genesis 64 zeros; SHA-256 over canonical JSON; review log anchored to `run_finished` |
+| Case folder | [case.rs](../src/core/src/case.rs) | `rakvor.case/1`, `rakvor.registry/1`; lock wait 30 s; stale lock 600 s; role `Analysis` |
+| Timestamp, report signing | [trust.rs](../src/core/src/trust.rs) (shared) | default TSA `http://timestamp.digicert.com`; HTTP timeout 15 s; nonce 8 bytes |
+| Reports | [report/](../src/core/src/report/mod.rs) | built-in PDF writer, A4, WinAnsi; signature placeholder 16 384 bytes |
+| Finding codes | [model.rs](../src/core/src/model.rs) | `FINDING_CODES` (22 email codes) + `PIPELINE_FINDING_CODES` (8) |
 
-<!-- forge:domain -->
-| Domain process | Implementation | Key constants |
-| --- | --- | --- |
-| Type detection, extension mismatch, executables, empty files | [src/core/src/analyzer.rs](../src/core/src/analyzer.rs) | 15 signatures; text extensions `txt csv log xml json html` |
-| Duplicates, intake registration | [src/core/src/report/mod.rs](../src/core/src/report/mod.rs) `duplicate_groups`; [src/core/src/run.rs](../src/core/src/run.rs) `register_items` | primary (first) algorithm; size > 0 |
-| Role in the case folder | [src/core/src/lib.rs](../src/core/src/lib.rs) `CASE_ROLE` | `Intake` |
-<!-- /forge:domain -->
+The core never prints; the CLI ([main.rs](../src/cli/src/main.rs)) and the GUI ([state.rs](../src/gui/src/state.rs))
+render the same event stream, so both front-ends produce the same audit actions, findings and reports.
 
-The core never prints; the CLI ([src/cli/src/main.rs](../src/cli/src/main.rs)) and the GUI
-([src/gui/src/state.rs](../src/gui/src/state.rs)) render the same event stream, so both front-ends produce the
-same audit actions, findings and reports.
-
-<!-- forge:domain -->
-## B2 Pipeline and reads of the evidence
+## B2 Pipeline, worker isolation and reads of the evidence
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant R as run.rs
+    participant R as run.rs (parent)
     participant A as audit.jsonl
-    participant C as case folder
-    participant E as Evidence (read-only)
-    participant O as reports folder
-    R->>C: verify case log + registry, append run_started (under lock)
-    R->>A: run_started, case_linked, ui_* (GUI), environment_recorded, inputs_resolved
-    loop every item
-        R->>A: item_started (size, mtime)
-        R->>E: File::open, 1 MiB chunks, 1–2 digests + first 4 KiB
-        R->>A: item_hashed (digests, bytes_read, mtime_unchanged)
-        R->>A: item_analyzed (type, extension, findings, status)
+    participant W as worker process
+    R->>A: run_started, environment_recorded, analysis_configured (key file SHA-256, PSL version, limits)
+    loop every evidence file
+        R->>R: open read-only, hash (1–2 algorithms, one pass), keep first 4 KiB
+        R->>A: item_started, item_hashed {digests, bytes_read, mtime_unchanged}
+        alt .eml or .msg
+            R->>W: spawn: worker --in FILE --item-dir DIR --opts JSON
+            R->>W: apply limits, then "RV-WORKER-GO"
+            W->>W: second read of the file, analyse_bytes, write headers.json, dkim.json, attachments/
+            W-->>R: one JSON document (findings, details, outputs)
+        else mbox
+            R->>R: byte scan for "From " separators, write mbox_index.json
+            loop every message n
+                R->>A: message_started {n, offset, message_offset, length}
+                R->>R: re-read the message bytes from the mbox, hash them
+                R->>A: message_hashed
+                R->>W: worker with --message {n, offsets, mbox digests}
+                W-->>R: findings, outputs
+            end
+        end
+        opt --online and a key is missing
+            R->>R: dnsfetch (system resolver), parent only
+            R->>A: dkim_key_fetched {name, found, txt_sha256}, analysis_repeated
+        end
+        R->>A: output_written (digests of every file the worker wrote), item_analyzed {findings, status}
     end
-    R->>C: register items, write registry, append evidence_registered (under lock)
-    R->>A: evidence_registered ×N, duplicate_group, hash_register_written
-    R->>O: per-item reports, then item_reports_written ×N
-    R->>A: timestamp_obtained / timestamp_pending, statistics_report_written, run_finished
-    R->>C: run_finished with the final audit head (under lock)
+    R->>A: duplicate groups, hash_register_written, item_reports_written / item_reports_skipped, statistics_report_written
+    R->>A: timestamp_obtained (or timestamp_pending), run_finished
 ```
 
-The evidence is read **once**, sequentially, with `File::open` (read-only access). The type check uses the first
-4 096 bytes kept during that same read, so there is no second read and no window in which the bytes hashed and
-the bytes examined could differ. The modification time is read before and after hashing and compared
-(`mtime_unchanged` in `item_hashed`); a change means the file was being written during the read.
-
-Ordering facts an opposing expert may test:
-
-- Registration happens **after** all items are hashed and **before** duplicates are computed, so a cancelled run
-  still registers the items it finished.
-- The timestamp is requested after the last `item_reports_written` and **before** the statistics report, so the
-  token covers every evidence digest, finding and item-report digest, but not the statistics report or
-  `run_finished` (both are written after it; see [B8](#b8-rfc-3161-trusted-timestamp)).
-- A wrong certificate password stops the run (`run_failed`) before any evidence byte is read.
-<!-- /forge:domain -->
+- **Reads.** The parent reads each file once to hash it; the worker reads it a second time to analyse it (an
+  mbox message is re-read from the mbox at its offset and hashed again). The worker hashes the bytes it analysed
+  (`headers.json` → `sha256`), so the analysed bytes are bound to the evidence digest.
+- **Isolation.** The child starts with piped stdio and waits for `RV-WORKER-GO` until the parent has applied the
+  limits — Windows: a Job Object with a process memory limit, kill-on-close and no error dialog; Unix:
+  `RLIMIT_AS` and `RLIMIT_CORE` = 0; Linux: also an empty network namespace (`unshare(CLONE_NEWNET)`, recorded as
+  `details.worker.network`). Timeout → kill. Any failure is `PARSER_FAILED` (medium) for that item only, with the
+  reason and the exit code; files a failed worker left are kept and audited as `partial_output`.
+- **No network in the analysis.** The worker code path contains no code that opens a connection
+  (`worker_code_path_has_no_network_code`); DKIM keys come from the key file, or from records the parent fetched
+  in `--online` mode.
+- **Same answer in process.** `--isolation in-process` runs the same `analyze_bytes`; `src/cli/tests/worker.rs`
+  checks that both give identical findings on the sample and that crash, hang and memory faults are contained.
 
 ## B3 Single-pass dual hashing
 
 | Algorithm | Standard | Output | Status for evidence |
 | --- | --- | --- | --- |
 | `md5` | RFC 1321 | 128 bit | Practical collisions since 2004–2005 (Wang & Yu); legacy matching only |
-| `sha1` | FIPS 180-4 | 160 bit | Practical collision 2017 (Stevens et al., "SHAttered"); legacy matching only |
+| `sha1` | FIPS 180-4 | 160 bit | Practical collision 2017 (Stevens et al.); legacy matching only |
 | `sha256` | FIPS 180-4 | 256 bit | Default; recommended primary |
 | `sha512` | FIPS 180-4 | 512 bit | Recommended |
 | `sha3-256` | FIPS 202 | 256 bit | Sound; less familiar to courts |
 | `blake3` | BLAKE3 specification (2020) | 256 bit | Sound; not a NIST-approved hash |
 
-Implementations: RustCrypto `md-5`, `sha1`, `sha2`, `sha3` and the official `blake3` crate (exact versions in each
-run's `environment.json` → `dependencies`).
+Every 1 MiB chunk is passed to both hashers before the next read, so the two digests describe the same byte
+stream (`one_pass_feeds_two_digests_identically_to_separate_passes`). The first algorithm is the primary (duplicate
+groups, the customer's "digital fingerprint", first comparison with the case registry). `self-test` checks every
+algorithm against the published digest of `"abc"`. The tool accepts `md5,sha1` without a SHA-2/SHA-3/BLAKE3
+algorithm; choosing a collision-resistant one is the examiner's job (gap G11). Attachments and per-message
+outputs are always hashed with SHA-256 (`headers.json`), and every output file additionally with the run's
+algorithms (`output_written`).
 
-```text
-hash_reader(r, algos)                                        src/core/src/hash.rs
-  validate_selection: 1 ≤ len ≤ 2, the two different        → else usage error (exit 2)
-  loop:
-    n = r.read(buf[0 .. 1 048 576])                          Interrupted → retry; other error → UNREADABLE
-    if n = 0: break
-    head += buf[0 .. min(n, 4096 − len(head))]               first 4 KiB, for type detection
-    for each hasher h: h.update(buf[0 .. n])                 the same slice feeds both digests
-    total += n
-    if on_chunk(total) = false: return cancelled             cancel granularity = one chunk
-  return (digests in selection order, total, head)
-```
+## B4 DKIM canonicalisation
 
-- **Same bytes for both digests.** Each chunk is passed to every hasher before the next read, so the two digests
-  can only describe the same byte stream. The unit test `one_pass_feeds_two_digests_identically_to_separate_passes`
-  checks a 3 MiB + 17-byte stream against separate one-shot digests.
-- **Primary algorithm.** The first selected algorithm is the primary: it groups duplicates, is shown as the
-  customer's "digital fingerprint" and is compared first with the case registry.
-- **`self-test`** checks every algorithm against the published digest of `"abc"` (e.g. SHA-256
-  `ba7816bf…f20015ad`, FIPS 180-4 example). It proves the build computes correct digests; it does not test type
-  detection or reports.
-- **Avalanche, measured** for [A2](#a2-digital-fingerprints-hashes): the two inputs differ in one character
-  (`'z'` = 0x7A, `'s'` = 0x73, 2 bits); their SHA-256 digests differ in **136 of 256 bits** (≈ 128 expected for an
-  ideal function), and only 4 of the 64 hexadecimal positions coincide.
-- **No hash policy.** The tool accepts `md5,sha1` without any SHA-2/SHA-3/BLAKE3 algorithm. Choosing at least
-  one collision-resistant algorithm is the examiner's job ([admissibility.md](admissibility.md#consolidated-gap-list), G11).
-- **Size.** `item_started` records the size from the file system; `item_hashed` records `bytes_read`. The reports
-  use `bytes_read`. A difference between the two means the file changed size while it was being read.
+DKIM (RFC 6376) signs a *canonical* form of the message, so that harmless rewriting in transit does not break the
+signature. `c=header/body` names the two algorithms (default `simple/simple`); `dkim.json` records it per
+signature.
 
-<!-- forge:domain -->
-## B4 Type detection by magic bytes and extension mismatch
+| | `simple` | `relaxed` |
+| --- | --- | --- |
+| Header fields (§3.4.1, §3.4.2) | byte for byte | name lower-cased; unfolded; runs of whitespace → one space; whitespace before and after the colon and at the end removed |
+| Body (§3.4.3, §3.4.4) | trailing empty lines removed (an empty body becomes CRLF) | also: whitespace at line ends removed, runs of whitespace → one space, then trailing empty lines removed |
 
-### Signature table ([analyzer.rs](../src/core/src/analyzer.rs) `SIGNATURES`, first match wins)
+Consequences for the examiner: under `relaxed` body canonicalisation, re-wrapping whitespace does not change the
+body hash, but **any** change of a visible character does; under `simple`, even a changed line ending inside the
+body does. Content-Transfer-Encoding is **not** undone: the body hash covers the encoded bytes (quoted-printable,
+base64), so re-encoding a message (as `.msg` storage does, [B12](#b12-outlook-msg-and-mbox)) changes the body hash
+without any change of meaning.
 
-| # | Detected type | Offset | Magic bytes | Expected extensions | Executable |
-| --: | --- | --: | --- | --- | :-: |
-| 1 | PDF document | 0 | `25 50 44 46 2D` (`%PDF-`) | pdf | |
-| 2 | PNG image | 0 | `89 50 4E 47 0D 0A 1A 0A` | png | |
-| 3 | JPEG image | 0 | `FF D8 FF` | jpg jpeg jpe jfif | |
-| 4 | GIF image | 0 | `47 49 46 38` (`GIF8`) | gif | |
-| 5 | ZIP / Office Open XML | 0 | `50 4B 03 04` (`PK..`) | zip docx xlsx pptx odt ods jar apk epub | |
-| 6 | OLE2 (legacy Office, MSG) | 0 | `D0 CF 11 E0 A1 B1 1A E1` | doc xls ppt msg | |
-| 7 | Windows executable (PE) | 0 | `4D 5A` (`MZ`) | exe dll sys scr com efi | yes |
-| 8 | Linux executable (ELF) | 0 | `7F 45 4C 46` | so bin elf o | yes |
-| 9 | SQLite database | 0 | `SQLite format 3` + `00` | db sqlite sqlite3 | |
-| 10 | 7-Zip archive | 0 | `37 7A BC AF 27 1C` | 7z | |
-| 11 | RAR archive | 0 | `52 61 72 21 1A 07` | rar | |
-| 12 | GZIP archive | 0 | `1F 8B` | gz tgz | |
-| 13 | Windows event log (EVTX) | 0 | `ElfFile` + `00` | evtx | |
-| 14 | Windows registry hive | 0 | `72 65 67 66` (`regf`) | dat hve | |
-| 15 | MP4 / QuickTime video | 4 | `66 74 79 70` (`ftyp`) | mp4 m4v mov m4a 3gp heic | |
+**`l=` (body length).** A signature may cover only the first `l` bytes of the canonical body; bytes added after
+them do not affect the result. mail-auth computes the hash over `l` bytes, and `dkim.json` records `body_length`,
+but no finding flags a signature whose `l=` is shorter than the body (gap G-MAIL5): check `body_length` against
+the body when a signature has `l=`.
 
-### Annotated example: `examples/sample/evidence/foto-vacaciones.jpg` (112 bytes)
-
-```text
-offset  bytes                                            text
-     0  25 50 44 46 2D 31 2E 34 0A 25 20 73 61 6D 70 6C  %PDF-1.4.% sampl   ◄ bytes 0–4 = signature #1 "PDF document"
-    16  65 3A 20 61 20 50 44 46 20 72 65 6E 61 6D 65 64  e: a PDF renamed
-    32  20 61 73 20 61 20 70 68 6F 74 6F 0A 31 20 30 20   as a photo.1 0
-   ...
-    96  20 31 20 30 20 52 20 3E 3E 0A 25 25 45 4F 46 0A   1 0 R >>.%%EOF.
-name "foto-vacaciones.jpg" → extension "jpg" (lower-cased text after the last dot)
-"jpg" ∉ {pdf}  and  "jpg" is a known extension (signature #3)  → EXTENSION_MISMATCH (medium)
-                                                                 detected = "PDF document", extension = "jpg"
-```
-
-### Decision ([analyzer.rs](../src/core/src/analyzer.rs) `analyze`)
+## B5 The body hash (bh=) and the header signature (b=)
 
 ```mermaid
-flowchart TB
-    S["name, size, first 4 KiB"] --> Z{"size = 0?"}
-    Z -->|yes| E0["EMPTY_FILE (info)"]
-    S --> D{"a signature matches<br/>at its offset?"}
-    D -->|no| U["detected_type = unknown<br/>no type finding"]
-    D -->|yes| X{"file name has<br/>an extension?"}
-    X -->|no| N["no finding"]
-    X -->|yes| L{"extension in the<br/>signature's list?"}
-    L -->|yes| N
-    L -->|no| P{"executable<br/>signature?"}
-    P -->|yes| H["EXECUTABLE_CONTENT (high)"]
-    P -->|no| K{"extension known to any signature<br/>or txt csv log xml json html?"}
-    K -->|yes| M["EXTENSION_MISMATCH (medium)"]
-    K -->|no| N
+flowchart TD
+    S["DKIM-Signature header<br/>v=1; a=; c=; d=; s=; h=; bh=; b="] --> X{"x= set and earlier<br/>than the analysis clock?"}
+    X -- yes --> NE["not_evaluated: signature expired<br/>(DKIM_SIGNATURE_NOT_EVALUATED, low)"]
+    X -- no --> BH{"hash(canonical body, l=) = bh= ?"}
+    BH -- no --> BHM["body_hash_mismatch<br/>DKIM_BODY_HASH_MISMATCH (high)<br/>no key needed"]
+    BH -- yes --> K{"public key for s=._domainkey.d= ?"}
+    K -- no --> KNA["key_not_available<br/>DKIM_KEY_NOT_AVAILABLE (info)"]
+    K -- yes --> B{"verify b= over<br/>canonical h= fields + this header (b= empty)"}
+    B -- no --> SI["signature_invalid<br/>DKIM_SIGNATURE_INVALID (medium)"]
+    B -- yes --> P["pass<br/>DKIM_SIGNATURE_VALID (info)<br/>+ alignment check"]
 ```
 
-Consequences that matter in court (all from the code, all tested or testable with the samples):
+This is mail-auth's order (`dkim/verify.rs`), reproduced by the classification in `dkim.rs` `classify`:
 
-- A program **without an extension** (`invoice`) or with an unlisted one (`notes.md`) gets no finding: the
-  comparison needs an extension, and non-executable mismatches need a known or text extension.
-- The PE test is only 2 bytes (`MZ`) and GZIP only 2 bytes (`1F 8B`): a text file `notes.txt` that begins with
-  `MZ` is reported as `EXECUTABLE_CONTENT` (false positive). Confirm with a PE parser before relying on it.
-- Containers are typed by their outer signature: a `.docx` and a `.jar` are both "ZIP / Office Open XML", so a
-  `.jar` renamed `.docx` gives no finding. HEIC and MP4 share `ftyp`.
-- Matching is on the content's first bytes only; the extension is case-insensitive (`.JPG` = `.jpg`).
-- No error rates have been measured on a labelled corpus ([admissibility.md](admissibility.md#consolidated-gap-list), G5).
+1. **Expiry first.** A signature with `x=` that is not later than both `t=` and the **current clock** is reported
+   expired before anything else is computed. For forensic work on old mail this means a signature with a short
+   `x=` is never evaluated, not even its body hash (gap G-MAIL4, [HANDOFF](HANDOFF.md#6-open-work)).
+2. **`bh=` needs no key.** It is the base64 of the hash (SHA-256 for `rsa-sha256` and `ed25519-sha256`) of the
+   canonical body. In `03-body-edited.eml` (relaxed/relaxed): `bh=uqPtfB1C…ZnnTmc=` was computed over a body
+   saying `1.200 EUR`; the body now says `12.000 EUR` and hashes to `Ky2onvEV…B2Mo=`. A mismatch shows the
+   body changed after signing whatever key is or is not supplied, hence **high**.
+3. **`b=` needs the key.** It is the signature (RSA PKCS#1 v1.5, or Ed25519) over the canonical header fields
+   listed in `h=` (each taken from the bottom-most unused instance; a name listed more times than it occurs signs
+   its absence — the sample signs `from` twice so that a second From cannot be added) followed by the
+   DKIM-Signature header itself with `b=` emptied. The body enters only through `bh=`. With a matching body hash,
+   a failure means a signed header changed **or** the key is not the one that signed; `05-rotated-key.eml` is a
+   genuine message checked with the selector's new key and gives exactly the same result as
+   `04-header-edited.eml`. Hence **medium**, with both explanations in the wording ([ADR
+   0004](adr/0004-email-design-decisions.md)).
+4. **Alignment.** A passing signature whose `d=` does not share the From domain's organisational domain
+   ([B9](#b9-organisational-domain-from-the-public-suffix-list)) gives `DKIM_DOMAIN_NOT_ALIGNED` when no passing
+   signature is aligned (relaxed, DMARC-style). Sending services sign with their own domain; this is not spoofing
+   by itself.
 
-## B5 Duplicate detection by digest
+Independent check: `tests/oracle_dkim.py` re-verifies every sample signature with dkimpy and the same keys and must
+agree signature by signature (pass vs not pass).
+
+## B6 Offline key injection and the online mode
+
+```mermaid
+flowchart LR
+    Z["archived zone / provider export<br/>/ passive DNS"] --> I["keys import<br/>(own audit run, SHA-256 of sources)"]
+    I --> F["key file<br/>name TAB v=DKIM1; k=; p="]
+    F --> L["load_key_file<br/>SHA-256 → analysis_configured"]
+    L --> C["DNS cache entries<br/>s._domainkey.d. → DomainKey"]
+    C --> V["verifier with an empty resolver"]
+    O["--online: parent fetches missing names<br/>(system resolver)"] -. "dkim_key_fetched + DKIM_KEY_FROM_CURRENT_DNS" .-> C
+```
+
+- **Key file.** One record per key: `selector._domainkey.domain<TAB>v=DKIM1; k=rsa; p=…`, or a BIND zone-file TXT
+  record (TTL and class optional, quoted strings joined, parentheses across lines, `;` comments outside quotes).
+  `keys import` validates every DKIM record with the same parser `analyze` uses, skips other record types, other
+  names and revoked keys (empty `p=`) — each listed in its audit log — merges identical duplicates, refuses two
+  different keys under one name, and writes a sorted, normalised file whose header names every source and its
+  SHA-256. `keys show` lists selector, domain, key type and bits.
+- **Injection.** For every DKIM-Signature, ARC-Message-Signature and ARC-Seal the tool computes the key name and,
+  when the key file (first) or the parent's fetch (second) has it, parses it as a DKIM key record and inserts it
+  into the verifier's TXT cache under `name.`. The verifier itself is built with `ResolverConfig::from_parts(None,
+  [], [])`: a name not in the cache fails at once and is classified `key_not_available`.
+- **Provenance in the report.** Each signature records `key_source` (`key_file` with the line number, or
+  `current_dns`) in `dkim.json` and in the finding.
+- **Online mode.** Only names missing from the key file are fetched, once per run, by the parent with the system
+  resolver configuration; each fetch is an audit entry with the TXT record's SHA-256, elapsed time and error, and
+  the item is analysed again with the fetched keys (`analysis_repeated`). A key published today may not be the
+  one that signed (rotated, revoked, re-published by the domain's current holder), hence
+  `DKIM_KEY_FROM_CURRENT_DNS` (medium) on every signature verified with it.
+
+What no tool can supply: proof that a key in the key file **was** the domain's key at sending time. That rests on
+the provenance of the archive, which the examiner documents.
+
+## B7 ARC
+
+ARC (RFC 8617) adds, per intermediary *i*, an `ARC-Authentication-Results`, an `ARC-Message-Signature` (a
+DKIM-like signature over the message as received by *i*) and an `ARC-Seal` (a signature over the ARC headers of
+sets 1…*i*, with `cv=` the chain validation status *i* found). The tool runs mail-auth's `verify_arc` with the
+same injected keys and reports `none` (no ARC headers), `pass`, `invalid` (structure broken, a signature fails or
+`cv=fail`) or `key_not_available`. `ARC_CHAIN_INVALID` (medium) means the chain as stored does not validate; the
+sample `15-forwarded-unknown-key.eml` has an incomplete set (1 instance, "Broken or missing ARC chain"). An ARC
+pass shows what the sealers stated; it does not re-establish the original DKIM result.
+
+## B8 Received hop ordering, dates and clock skew
 
 ```text
-duplicate_groups(items)                                     src/core/src/report/mod.rs
-  key = primary digest (first selected algorithm)
-  only items that were hashed (no UNREADABLE) and have size > 0 (empty files are all identical)
-  groups = items sharing a key, if 2 or more            → audit: duplicate_group {algorithm, hash, items}
-  each member gets DUPLICATE (info) {algorithm, count, others}, others capped at 10 names + "… (+N)"
+parse_received(value)                                         src/core/src/mail.rs
+  date  = text after the last ';' (RFC 5322 date-time), parsed to UTC + zone offset
+  from, by, with, id, for = first token after each keyword, (comments) removed
+  header_index = 0 for the topmost Received header; position = hops_total − header_index
+                 → position 1 = the bottom-most header = the hop closest to the sender
+date_findings(h, skew)
+  timed hops sorted by position; for consecutive hops a, b: if t(b) + skew < t(a) → backwards step
+      first backwards step → RECEIVED_TIME_NOT_MONOTONIC {hop, previous_hop, earlier_by_s, count}
+  if Date + skew > t(first timed hop) → DATE_AFTER_FIRST_HOP {later_by_s}
+  Date zone invalid (|offset| > 14 h or not a multiple of 15 min) → TIMEZONE_INCONSISTENT (invalid_offset)
+  else if the first hop was stamped by a server of the From organisation (org(by) = org(From))
+      and its zone ≠ the Date zone → TIMEZONE_INCONSISTENT (sender_server_zone_differs)
+attachments: creation-date / modification-date (MIME Content-Disposition, or .msg PR_CREATION_TIME /
+  PR_LAST_MODIFICATION_TIME) later than Date + skew → ATTACHMENT_DATE_AFTER_SENT (≤ 10 per message)
+Message-ID: org(domain after '@') ≠ org(From domain), domain containing a dot → MESSAGE_ID_DOMAIN_MISMATCH
 ```
 
-Two different files with the same SHA-256 would require a collision; no SHA-256 collision is publicly known, and
-the generic birthday bound for 256-bit digests is about 2¹²⁸ operations. With `md5` or `sha1` as the primary,
-deliberately colliding files can be produced (B3), so a duplicate group computed on MD5 alone proves less. The
-complete groups (paths, not only names) are in `statistics.json` and `hashes.csv`.
-<!-- /forge:domain -->
+Real values from `12-mailbox.mbox#3`: hop 1 stamped `2026-11-11T10:00:00Z`, hop 2 `09:40:00Z` (1 200 s earlier,
+beyond the 300 s tolerance) → `RECEIVED_TIME_NOT_MONOTONIC`; Date `11:30:00Z`, 5 400 s after hop 1 →
+`DATE_AFTER_FIRST_HOP`; Date zone `+0500`, the sender's server `+0000` → `TIMEZONE_INCONSISTENT`; Message-ID under
+`mailer.example.com`, From `example.org` → `MESSAGE_ID_DOMAIN_MISMATCH`.
 
-## B6 The audit hash chain
+What hop analysis can and cannot show: the order of hops is the order of the header lines, and the times are what
+each server wrote. Lines added by the recipient's own servers are as trustworthy as those servers; lines below
+them could have been written by anyone, including at the time the file was edited. A consistent route is
+therefore not proof of a genuine route; an inconsistent one is a reason to look, with clock drift, queued
+retries and mis-set server zones as innocent explanations. `--clock-skew` (0–86 400 s) sets the tolerance and is
+recorded in `analysis_configured`.
+
+## B9 Organisational domain from the Public Suffix List
+
+Alignment, Reply-To/Return-Path, Message-ID and display-name comparisons and the lookalike labels use the
+**organisational (registrable) domain**: the public suffix plus one label (`psl.rs`, the algorithm of
+publicsuffix.org):
+
+```text
+org_domain(d): lower-case, trailing dot removed, punycode labels decoded to Unicode
+  rules = ICANN + PRIVATE sections of the bundled list (10 414 rules)
+  the longest matching rule wins; an exception rule (!x.y) beats a wildcard (*.y);
+  an unlisted top-level label is a public suffix (implicit *)
+  org = matched public suffix + one more label; a domain that IS a public suffix is its own org domain
+examples: mail.acme.example → acme.example        a.b.example.co.uk → example.co.uk
+```
+
+Using the PRIVATE section means that two customers of one hosting platform (for example two sites under a
+platform's shared domain listed there) are different organisations, as browsers treat them. The list is pinned
+(version, commit, SHA-256 in `PSL_VERSION.txt`, checked by a test, recorded per run); it may differ from the
+list in force when the message was sent ([ADR 0004](adr/0004-email-design-decisions.md)).
+
+## B10 Lookalike domains and confusable skeletons
+
+For each sender-side domain (From, Sender, Reply-To, Return-Path) that is not an own domain, and each
+`--own-domain`, `bec::lookalike` tries, in order:
+
+| Method | Rule | Example |
+| --- | --- | --- |
+| `punycode` | the Unicode form of the domain has the same organisational domain as the own domain, although the ASCII forms differ | an `xn--` spelling of the own domain |
+| `same_name_other_suffix` | same registrable label, other suffix | `acme.example` vs `acme.test` |
+| `confusable` / `punycode_confusable` | Unicode TR39 **skeletons** of the two labels are equal (`unicode-security`) | `acrne` → skeleton `acme`; Cyrillic `а` (U+0430) → Latin `a` |
+| `edit_distance_1` / `_2` | Levenshtein distance ≤ 2 between the labels, own label ≥ 4 characters | `acme` vs `acne`, `acmee` |
+
+A skeleton maps every character to a prototype of its confusable class (UTS #39 §4, data file
+`confusables.txt`) after lower-casing, so strings that look alike map to the same skeleton. The sample's
+`acrne.example` gives `method: confusable` (r + n → m). The comparison is label against label (organisational
+domains), so a subdomain of the own domain never matches. Edit distance has false positives between short
+unrelated names; the 4-character floor limits them.
+
+## B11 Reply-To, Return-Path, display name and payment wording
+
+- `REPLY_TO_DIFFERS`: the first Reply-To address, and the Return-Path, whose organisational domain differs from
+  the From domain's (one finding per header). Return-Path is set by the last delivering server from the SMTP
+  envelope sender; bounce handlers and bulk senders use other domains legitimately.
+- `DISPLAY_NAME_SPOOF`, reason `address_in_name`: the display name contains something shaped like an address
+  (local part, `@`, a dotted domain) different from the actual address. Reason `own_name_external_address`: the
+  address is not an own domain and the display name contains an own domain, or its registrable label (≥ 4
+  characters) as a whole word (`ACME - Dirección Financiera` from `@example.net`).
+- `PAYMENT_DETAILS_MENTIONED` (info): whole-word, case-insensitive matches in the subject and text parts (≤ 1 MiB)
+  of 33 terms — English (`iban`, `bank details`, `wire transfer`, `new account`, …), Spanish (`datos bancarios`,
+  `cuenta bancaria`, `clabe`, …), French (`coordonnées bancaires`, `rib`, `virement`, …) — plus `iban_number` for
+  an IBAN-shaped sequence whose ISO 13616 check (mod 97 = 1) holds. The sample `09-payment-details.eml` lists
+  `bank details, coordonnées bancaires, datos bancarios, iban, iban_number, nouvelles coordonnées`.
+
+## B12 Outlook .msg and mbox
+
+**.msg (MS-OXMSG).** A compound file whose MAPI properties are streams `__substg1.0_<TAG><TYPE>` (string types
+0x001F UTF-16LE and 0x001E 8-bit, binary 0x0102) and fixed-size entries of `__properties_version1.0`; attachments
+are storages `__attach_version1.0_#XXXXXXXX`. Outlook stores the body and attachments re-encoded; the original
+header section survives only in `PR_TRANSPORT_MESSAGE_HEADERS` (0x007D). With it, the hops, dates and
+Authentication-Results are analysed from the stored header text and the DKIM signatures are listed but not
+evaluated (`msg_body_not_original`, [B4](#b4-dkim-canonicalisation)); without it, `MSG_TRANSPORT_HEADERS_MISSING`
+(medium) and the summary comes from the MAPI properties (subject, sender or sent-representing address, submit
+time). A damaged compound file is `FILE_STRUCTURE_DAMAGED` (format `msg`).
+
+**mbox.** A message starts at a line beginning `From ` that is the first line of the file or follows an empty
+line; the stored message runs to the next separator, minus the empty line in front of it. Writers escape body
+lines starting `From ` with `>`; **mboxrd** also escapes lines already starting `>…From `, so reading strips one
+`>` from every `^>+From ` line; **mboxo** strips it only from `^>From ` and cannot tell an escaped line from an
+original `>From ` line. The wrong variant changes the body bytes and therefore the body hash (limitation
+`MBOX_ESCAPING_AMBIGUOUS`); message 1 of the sample contains an escaped `>From ` line and verifies under mboxrd.
+The split is a byte scan in the parent; each message is a derived item with id `<path>#<n>@<offset>`, hashed
+again from the mbox bytes (`message_hashed`) and analysed by its own worker. Bytes before the first separator, no
+separator at all, or an empty last message are `FILE_STRUCTURE_DAMAGED` (format `mbox`) on the container.
+
+## B13 The audit hash chain
 
 Each line of `audit.jsonl` is one JSON object: `seq`, `ts_utc`, `run_id`, `actor`, `action`, optional `item`,
 `details`, `prev_entry_hash`, `entry_hash` ([audit.rs](../src/core/src/audit.rs)). `audit.log` is a readable copy of
@@ -427,7 +561,7 @@ entry_hash_n      = SHA-256( canonical(e_n) )                 hex, lower case
 prev_entry_hash_1 = 64 × "0";   prev_entry_hash_n = entry_hash_(n-1);   seq_n = n
 ```
 
-**Worked example** (computed for this page with the rule above; `rv-mailauth verify-log` accepts these three lines):
+**Worked example** (three illustrative entries computed for this page with the rule above — not from the email sample; `rv-mailauth verify-log` accepts them):
 
 ```text
 #1 canonical (287 bytes)
@@ -483,8 +617,8 @@ flowchart LR
 | Report and output digests are bound to the run | When the entries were written (host clock, `ts_utc`) |
 
 External anchors close those gaps: a complete run ends with `run_finished` (or `run_failed` / `run_cancelled`);
-the case log records the run's final entry count and head ([B7](#b7-the-case-folder)); the RFC 3161 token binds
-entry *N* ([B8](#b8-rfc-3161-trusted-timestamp)); the statistics report prints the head and entry count at the
+the case log records the run's final entry count and head ([B14](#b14-the-case-folder)); the RFC 3161 token binds
+entry *N* ([B15](#b15-rfc-3161-trusted-timestamp)); the statistics report prints the head and entry count at the
 time it was written; a signed PDF report binds that head to the examiner's key.
 
 `verify-log` uses the first two automatically ([src/core/src/verify.rs](../src/core/src/verify.rs)):
@@ -503,7 +637,15 @@ library) and re-hashes the evidence listed in `hashes.csv` (it needs that file: 
 checker). The append-only file is opened with `create_new` + `append`: an existing log is never overwritten; only
 the `timestamp` command re-opens a log, after verifying it.
 
-## B7 The case folder
+**Review log.** Viewing after the run never touches `audit.jsonl` (its chain is closed at `run_finished`; only
+`timestamp_obtained` may follow). The GUI message viewer appends to `review.jsonl` in the same folder
+([review.rs](../src/core/src/review.rs)): same entry and hash rule, plus `anchor_seq` / `anchor_hash` in the first
+entry, whose `prev_entry_hash` is the `entry_hash` of the run's `run_finished` entry. `verify-log` and
+`verify-case` check it whenever it exists: chain intact, first entry anchored to **this** run's `run_finished`,
+every entry naming this run. An edited entry, a deleted one, or a review log copied next to another run is a
+failure (exit 3); the count is printed as "review entries: N".
+
+## B14 The case folder
 
 Layout and contract: [case-folder.md](case-folder.md). This section explains why the design holds.
 
@@ -517,7 +659,7 @@ Layout and contract: [case-folder.md](case-folder.md). This section explains why
 <CASE>/runs/<tool>/<RUN-ID>/{logs,reports}/
 ```
 
-Real registry entry from an intake of the sample (path shortened):
+A registry entry as the intake tool (rv-hashinv) writes it — here for a file of its own sample (path shortened):
 
 ```json
 {
@@ -525,7 +667,7 @@ Real registry entry from an intake of the sample (path shortened):
   "hashes": { "md5": "d0532b1672c85a82f561ad2de7e9a57a",
               "sha256": "42503ebb0f9892b30b72e11cfa0cbf5bcb5d60f667d611fa9598c9b4e835c643" },
   "path": "D:\\export\\foto-vacaciones.jpg",
-  "registered_by": { "audit_seq": 12, "run_id": "20261021T152805Z-e8fd7a", "tool": "rv-mailauth", "version": "0.1.0" },
+  "registered_by": { "audit_seq": 12, "run_id": "20261021T152805Z-e8fd7a", "tool": "rv-hashinv", "version": "…" },
   "registered_utc": "2026-10-21T15:28:05.909Z",
   "size": 112
 }
@@ -563,13 +705,10 @@ stateDiagram-v2
     NotRegistered --> [*]: EVIDENCE_NOT_IN_CASE_REGISTRY (medium)
 ```
 
-<!-- forge:domain -->
-This tool is the **intake** role (`CASE_ROLE = Intake`): it does not run the matching above. It registers every
-item that was hashed: same path and same content keeps the existing id (`already_registered`); a registered path
-with other content gets a **new** id and the finding `REGISTRY_PATH_CONTENT_CHANGED` (medium); anything else gets
-a new id. Unreadable items are not registered. The analysis matching is in the same code and runs in every tool
-scaffolded from this one.
-<!-- /forge:domain -->
+rv-mailauth is the **analysis** role (`CASE_ROLE = Analysis`): it runs the matching above for every item and
+never writes the registry. A message of an mbox is matched through its mbox (the registered file) and carries
+the mbox's evidence id. A mismatch does not stop the analysis: the examiner decides what the difference
+means, and the report shows both digests.
 
 ### Cross-linking of the two chains
 
@@ -587,12 +726,13 @@ sequenceDiagram
     C->>C: #4 run_finished {audit_entries 23, audit_head 92040a6e…ea62}
 ```
 
-(Values from a real intake of the sample.) `verify-case` checks, for every `run_started` in the case log: the run's
+(Values from a real intake run; an analysis run has the same links without `evidence_registered`, and its audit
+log records `evidence_verified_against_case` / `evidence_not_in_case_registry` per item instead.) `verify-case` checks, for every `run_started` in the case log: the run's
 `audit.jsonl` chain and timestamp tokens; that its `case_linked` names this case and quotes the `run_started` hash;
 and that entry `audit_entries` of the run has hash `audit_head`, with only `timestamp_obtained` allowed after it.
-It also warns about run folders the case log never announced. Editing either chain therefore breaks a link, and
+It also checks every run's `review.jsonl` (B13) and warns about run folders the case log never announced. Editing either chain therefore breaks a link, and
 truncating a finished run's audit log is detected here (and by `verify-log` on that run, which finds the case log
-from the run folder's location, [B6](#b6-the-hash-chained-audit-log)).
+from the run folder's location, [B13](#b13-the-audit-hash-chain)).
 
 With `--rehash`, `verify-case` also re-hashes the evidence: every registry entry whose path is still a file is
 read once with the entry's own algorithms (at most two, standard order) and compared with the registry. A path
@@ -601,10 +741,10 @@ latest registration; the earlier ids are listed as superseded. A difference is a
 or unreadable file is a warning, because evidence copies often live on another workstation.
 
 What `verify-case` does **not** do: validate the TSA certificate chain (it checks each token's TSA signature;
-the chain needs `verify-log --tsa-ca`, B8), or prove that the registry's first content equals
+the chain needs `verify-log --tsa-ca`, B15), or prove that the registry's first content equals
 the original source.
 
-## B8 RFC 3161 trusted timestamp
+## B15 RFC 3161 trusted timestamp
 
 ```mermaid
 sequenceDiagram
@@ -622,7 +762,7 @@ sequenceDiagram
 
 The **message imprint is the chain head itself**: the 32 bytes of `entry_hash` of entry *N*, declared as a SHA-256
 value. It is not hashed again, so `openssl ts -verify -digest <H>` works directly. Request layout (69 bytes; head
-from the worked example of B6, example nonce):
+from the worked example of B13, example nonce):
 
 ```text
 30 43                                   TimeStampReq SEQUENCE, 67 bytes
@@ -677,19 +817,17 @@ from the worked example of B6, example nonce):
 
 Standards: RFC 3161 (Time-Stamp Protocol), RFC 5816 (ESSCertIDv2 update), RFC 5652 (CMS).
 
-## B9 Signed PDF reports
+## B16 Signed PDF reports
 
-<!-- forge:domain -->
 Reports are written by a small built-in PDF writer ([report/pdf.rs](../src/core/src/report/pdf.rs)): PDF 1.4,
 A4, the standard Helvetica, Helvetica-Bold and Courier fonts with WinAnsiEncoding (English, Spanish and French
 characters; anything else becomes `?`), no embedded fonts, one cross-reference table, one `%%EOF`.
-<!-- /forge:domain -->
 
 With `--sign-cert`, the file is written **once** with a signature placeholder and then signed in place (no
 incremental update):
 
 ```text
-technical.en.pdf of the sample (39 620 bytes), real values
+a technical.en.pdf written by the shared PDF writer (39 620 bytes, from the reference tool), real values
 … 9 0 obj << /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached
              /ByteRange [0 0000006359 0000039129 0000000491] /Contents <3082…000> /M (D:…) /Reason (…) >>
   widget /FT /Sig /T (RakvorExaminerSignature), invisible, on page 1;  catalog /AcroForm /SigFlags 3
@@ -720,7 +858,7 @@ subject and SHA-256 fingerprint are logged as `signing_certificate_loaded` and p
 and `run.pdf_signer_certificate_sha256` in the JSON); the password is never logged, and the interactive prompt does
 not echo it.
 
-## B10 Custody forms
+## B17 Custody forms
 
 One form per item, `custody.json` plus HTML and PDF in the jurisdiction's language and in English
 ([report/mod.rs](../src/core/src/report/mod.rs) `custody_*`, [templates/custody.html](../templates/custody.html),
@@ -733,7 +871,8 @@ One form per item, `custody.json` plus HTML and PDF in the jurisdiction's langua
 | Item code | Evidence item (EMP/EF) code | Seal number | evidence id `E0001…` in a case folder, else `<RUN-ID>-<NNNNN>` |
 | Registered at intake | date and time (UTC) | same | registry `registered_utc` (case folder only) |
 | Description, location | file name · size · detected type; path of the examined copy | same | the run |
-| Integrity values | every digest of the run | same | `item_hashed` |
+| Integrity values | every digest of the run | same | `item_hashed` (`message_hashed` for an mbox message) |
+| Derived from (mbox message) | source mbox path and digests, message number, separator and first-header offsets, length | same | `derived_from` |
 | Operations | tool, version, run id, start and end (UTC), audit entries `#first–#last` | same | the run |
 | Transfers | 6 blank rows: date and time, delivered by, received by (name, ID, signature), purpose, condition of packaging / media | same | to sign by hand |
 | Signatures | examiner, receiver | same | to sign by hand |
@@ -742,83 +881,65 @@ One form per item, `custody.json` plus HTML and PDF in the jurisdiction's langua
 people. The form is a working aid, not the official Fiscalía *Registro de Cadena de Custodia* or a French
 *scellé* record ([admissibility.md](admissibility.md#consolidated-gap-list), G9).
 
-## B11 Determinism and repeatability
+## B18 Determinism and repeatability
 
 | Same input + same build gives the same … | Varies between runs |
 | --- | --- |
-| evidence digests, `bytes_read`, detected types, findings and their parameters | `run_id`, `ts_utc`, every `entry_hash` (they include time) |
+| evidence digests, `bytes_read`, detected types, findings and their parameters (for the same key file, PSL and options) | `run_id`, `ts_utc`, every `entry_hash` (they include time) |
 | item order and numbering (sorted paths), duplicate groups | absolute paths of the outputs, host, OS user (in `environment.json`) |
 | `hashes.csv` rows | report digests (reports print run id, times, the audit head); PDF `/CreationDate` |
 | evidence ids for an unchanged path and content (case folder) | the RFC 3161 token and nonce |
+| DKIM results with the same key file | `--online` results (today's DNS); a signature whose `x=` falls between two runs (B5) |
 
-Measured for this page: the Rust and Python builds of this tool, run on the sample with the same algorithms, gave
-identical digests, detected types and findings (compared on every `technical.json`). Item numbers are identical
-too: both profiles make each path absolute and lexically normalised and sort by that string **bytewise (UTF-8)**,
-so `a-b/x.txt` comes before `a/x.txt` ('-' 0x2D < '/' 0x2F) and `B.txt` before `a.txt`. The cross-profile test
-compares the numbering of such a folder ([input.rs](../src/core/src/input.rs) `items_are_sorted_by_normalised_path_bytes`;
-`cross_language_case_verification` with `RV_CROSS_PROJECT`), and CI verifies a case folder written by the Python
-profile ([tests/golden/](../tests/golden/regenerate.py)). File names that are not valid UTF-8 are outside this
-contract.
+Item numbers follow the shared rule of every Rakvor tool: each path is made absolute and lexically normalised and
+the items are sorted by that string **bytewise (UTF-8)**, so `a-b/x.eml` comes before `a/x.eml` ('-' 0x2D < '/'
+0x2F) ([input.rs](../src/core/src/input.rs) `items_are_sorted_by_normalised_path_bytes`). mbox messages keep
+their mbox's number and are ordered by offset. There is no Python profile of rv-mailauth; CI verifies a case
+folder written by the forge's Python profile ([tests/golden/](../tests/golden/regenerate.py)) and the sample
+run in-process and in worker processes gives identical findings (`src/cli/tests/worker.rs`). File names that are
+not valid UTF-8 are outside this contract.
 
 `environment.json` records the tool version, `rustc` version, target triple, every package and version listed in
-`Cargo.lock` (495 entries at this commit, for all platforms — not only those compiled into this binary), OS,
+`Cargo.lock` (573 entries at this commit, for all platforms — not only those compiled into this binary), OS,
 host, OS user, working directory and command line (or the GUI settings), so a second examiner can rebuild the same
 version and repeat the run (ISO/IEC 27037 repeatability and reproducibility, [admissibility.md](admissibility.md#61-isoiec-270372012--identification-collection-acquisition-and-preservation-of-digital-evidence)).
 
-<!-- forge:domain -->
-## B12 What each finding does not prove
+## B19 References
 
-| Finding (severity) | Rule (code) | Shows | Does not prove |
-| --- | --- | --- | --- |
-| `EMPTY_FILE` (info) | bytes read = 0 | The file has 0 bytes | Whether it was emptied on purpose or created empty |
-| `EXTENSION_MISMATCH` (medium) | signature found; extension not in its list; extension known or textual ([B4](#b4-type-detection-by-magic-bytes-and-extension-mismatch)) | Name and content signature disagree | An attempt to hide content; renaming is common and often innocent |
-| `EXECUTABLE_CONTENT` (high) | PE or ELF signature; extension not an executable one | A program stored under a non-program name | That the program is malicious; a 2-byte `MZ` match can be a false positive |
-| `DUPLICATE` (info) | same primary digest, size > 0 ([B5](#b5-duplicate-detection-by-digest)) | Identical content in several files | Who copied the file, when, or which copy is the original |
-| `UNREADABLE` (high) | open or read error | The OS error text | That the file is damaged; permissions and locks cause this |
-| `REGISTRY_PATH_CONTENT_CHANGED` (medium) | intake: registered path, other content | The path now holds other content (new evidence id) | Which version is the original, or why it changed |
-<!-- /forge:domain -->
+Email standards
 
-Case-folder findings (shared by every tool in the analysis role):
+- RFC 5322 (Internet Message Format, 2008) — header fields, `Received`, `Date`, `Message-ID`; RFC 2045–2049 and
+  RFC 2183 (MIME, Content-Disposition `creation-date` / `modification-date`).
+- RFC 6376 (DKIM signatures, 2011) — §3.4 canonicalisation, §3.5 tags (`bh=`, `b=`, `h=`, `l=`, `t=`, `x=`), §3.6
+  key records, §5.4 header selection; RFC 8463 (Ed25519 for DKIM, 2018); RFC 8301 (DKIM cryptographic algorithm
+  update, 2018).
+- RFC 8617 (Authenticated Received Chain, 2019); RFC 8601 (Authentication-Results header field, 2019).
+- RFC 7489 (DMARC, 2015) — organisational domain and relaxed alignment, as used here (DMARC itself is not
+  evaluated).
+- RFC 4155 (the application/mbox media type, 2005) — the mboxo/mboxrd escaping variants.
+- [MS-OXMSG] Outlook Item (.msg) File Format and [MS-OXPROPS] Exchange Server Protocols Master Property List
+  (Microsoft Open Specifications) — property tags of [B12](#b12-outlook-msg-and-mbox); [MS-CFB] Compound File
+  Binary format.
+- Unicode Technical Standard #39, *Unicode Security Mechanisms* (§4 confusable detection, skeletons); RFC 5890–5891
+  (IDNA, punycode labels).
+- Public Suffix List, <https://publicsuffix.org/list/> (version pinned in `src/core/data/PSL_VERSION.txt`).
+- ISO 13616-1 (IBAN structure and mod-97 check).
 
-| Finding (severity) | Rule (code) | Shows | Does not prove |
-| --- | --- | --- | --- |
-| `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high) | matched entry, a common algorithm differs ([B7](#matching-an-item-against-the-registry-analysis-role)) | The file examined is not bit-identical to the registered item | Who changed it, when, or whether deliberately |
-| `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium) | no entry by id, path or content | Continuity from intake cannot be shown for this file | That the file is altered or irrelevant |
+Hashing, timestamps and signatures
 
-The exact wording printed in reports is in [i18n/en.json](../i18n/en.json) (`findings`; also es, fr); a test
-enforces the same keys in all three languages.
+- NIST FIPS 180-4 (Secure Hash Standard, 2015); NIST FIPS 202 (SHA-3, 2015); RFC 1321 (MD5, 1992); J. O'Connor et
+  al., *BLAKE3: one function, fast everywhere* (2020).
+- RFC 3161 (Time-Stamp Protocol, 2001); RFC 5816 (ESSCertIDv2, 2010); RFC 5652 (CMS, 2009); RFC 8017 (PKCS #1 v2.2,
+  2016); RFC 5280 (X.509 PKI profile, 2008); ISO 32000-1:2008 (PDF 1.7, §12.8).
+- X. Wang, H. Yu, "How to Break MD5 and Other Hash Functions", EUROCRYPT 2005; M. Stevens et al., "The first
+  collision for full SHA-1", CRYPTO 2017.
+- ISO/IEC 27037:2012 — see [admissibility.md](admissibility.md) for what was verified of it.
 
-## B13 References
-
-Standards and specifications
-
-- NIST FIPS 180-4 (Secure Hash Standard, 2015); NIST FIPS 202 (SHA-3, 2015); RFC 1321 (MD5, 1992).
-- J. O'Connor, J.-P. Aumasson, S. Neves, Z. Wilcox-O'Hearn, *BLAKE3: one function, fast everywhere* (2020).
-- RFC 3161 (Time-Stamp Protocol, 2001); RFC 5816 (ESSCertIDv2 update for RFC 3161, 2010); RFC 5652
-  (Cryptographic Message Syntax, 2009); RFC 8017 (PKCS #1 v2.2, 2016); RFC 5280 (X.509 PKI profile, 2008).
-- ISO 32000-1:2008, *PDF 1.7* (§12.8 digital signatures); ETSI EN 319 142-1 (PAdES baseline signatures).
-- ISO/IEC 27037:2012 (identification, collection, acquisition and preservation of digital evidence) — see
-  [admissibility.md](admissibility.md) for what was verified of it.
-
-Academic and practitioner literature
-
-- X. Wang, H. Yu, "How to Break MD5 and Other Hash Functions", EUROCRYPT 2005.
-- M. Stevens, E. Bursztein, P. Karpman, A. Albertini, Y. Markov, "The first collision for full SHA-1",
-  CRYPTO 2017.
-
-<!-- forge:domain -->
-- G. Kessler, *File Signatures Table* (garykessler.net) and the `file(1)` / libmagic database — practitioner
-  references for magic numbers (to be verified against the entries of [B4](#b4-type-detection-by-magic-bytes-and-extension-mismatch)).
-- Format specifications for the signatures used: ISO 32000-1 (PDF header), ISO/IEC 15948 (PNG), ITU-T T.81
-  (JPEG SOI marker), PKWARE APPNOTE (ZIP local file header), RFC 1952 (GZIP), ISO/IEC 14496-12 (`ftyp` box),
-  Microsoft PE/COFF specification (`MZ` DOS header).
-<!-- /forge:domain -->
-
-Independent oracles used to cross-check this tool: Python `hashlib`/`blake3` for
+Independent oracles used to cross-check this tool: dkimpy for every DKIM verdict of the sample
+([tests/oracle_dkim.py](../tests/oracle_dkim.py), through `RV_TEST_PYTHON`, in CI); Python `hashlib`/`blake3` for
 [examples/sample/expected_hashes.csv](../examples/sample/expected_hashes.csv) and
-[tests/verify_chain.py](../tests/verify_chain.py) (both in CI); JSON Schemas via
-[tests/validate_reports.py](../tests/validate_reports.py) (in CI); pyHanko for signed PDFs
-([tests/validate_pdf_signature.py](../tests/validate_pdf_signature.py), in CI); OpenSSL for RFC 3161 tokens
-(manual, see above); the Python profile of this tool: a committed case folder it wrote
-([tests/golden/](../tests/golden/regenerate.py), in CI) and the live cross-profile test (case folders and item
-numbering, run when `RV_CROSS_PROJECT` is set).
+[tests/verify_chain.py](../tests/verify_chain.py); JSON Schemas via
+[tests/validate_reports.py](../tests/validate_reports.py); pyHanko for signed PDFs
+([tests/validate_pdf_signature.py](../tests/validate_pdf_signature.py)); OpenSSL for RFC 3161 tokens (manual,
+[B15](#b15-rfc-3161-trusted-timestamp)); a case folder written by the Python profile of the forge
+([tests/golden/](../tests/golden/regenerate.py)).
