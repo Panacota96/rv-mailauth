@@ -54,8 +54,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python helpers (independent verifiers + local test TSA/PKI for the trust tests)
-        run: pip install blake3 jsonschema pyhanko
+      - name: Python helpers (independent verifiers, dkimpy DKIM oracle, local test TSA/PKI for the trust tests)
+        run: pip install blake3 jsonschema pyhanko dkimpy pynacl
       - name: Unit and integration tests (includes docs/usage-cli.md drift check and trust tests)
         shell: bash
         env:
