@@ -926,7 +926,9 @@ fn analyze_recorded(
             .filter(|n| dns_keys.get(*n).is_some_and(Option::is_some))
             .collect();
         if !usable.is_empty() {
-            opts.fetched_keys = dns_keys.values().flatten().cloned().collect();
+            // Only this message's keys: the batch-wide cache stays in the parent. Passing all of it would grow
+            // the worker's --opts argument with every domain seen and hit the OS command-line limit.
+            opts.fetched_keys = keys_for_message(&missing, dns_keys);
             log.record(
                 "analysis_repeated",
                 Some(&path_s),
@@ -1258,8 +1260,47 @@ fn register_items(
     Ok(())
 }
 
+/// The fetched DKIM key records a message needs: those named in `names` that DNS returned, in `names` order.
+fn keys_for_message(
+    names: &[String],
+    cache: &BTreeMap<String, Option<KeyRecord>>,
+) -> Vec<KeyRecord> {
+    names
+        .iter()
+        .filter_map(|n| cache.get(n).cloned().flatten())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_worker_gets_only_its_own_fetched_keys() {
+        let rec = |n: &str| KeyRecord {
+            name: n.into(),
+            txt: "v=DKIM1; k=rsa; p=AAAA".into(),
+            source: "current_dns".into(),
+            ..KeyRecord::default()
+        };
+        let mut cache: BTreeMap<String, Option<KeyRecord>> = BTreeMap::new();
+        for d in 0..300 {
+            let n = format!("s{d}._domainkey.d{d}.example");
+            cache.insert(n.clone(), Some(rec(&n)));
+        }
+        cache.insert("gone._domainkey.example.org".into(), None);
+        let names = vec![
+            "s7._domainkey.d7.example".to_string(),
+            "gone._domainkey.example.org".to_string(),
+            "unknown._domainkey.example.net".to_string(),
+        ];
+        let got = keys_for_message(&names, &cache);
+        assert_eq!(
+            got.len(),
+            1,
+            "only the message's found keys, not the batch cache"
+        );
+        assert_eq!(got[0].name, "s7._domainkey.d7.example");
+    }
+
     use super::*;
 
     fn cfg(input: PathBuf, out: PathBuf) -> RunConfig {
