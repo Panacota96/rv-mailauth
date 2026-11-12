@@ -957,7 +957,7 @@ impl HashInvApp {
                     ui.colored_label(RED, format!("{}: {}", tr("message_refused"), e));
                 }
                 egui::ScrollArea::vertical()
-                    .max_height(300.0)
+                    .max_height(480.0)
                     .id_salt("results-scroll")
                     .show(ui, |ui| {
                         egui::Grid::new("results-grid")
