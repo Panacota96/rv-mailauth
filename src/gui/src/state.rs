@@ -1,12 +1,84 @@
 //! Everything the window shows and every rule it enforces, without any drawing code.
 //! Kept separate from `app.rs` so it can be unit-tested headless (CI has no display).
 
+use crate::viewer::{MessageView, RunView};
+use rv_mailauth_core::model::{DomainOptions, Severity};
 use rv_mailauth_core::{
     CASE_ROLE, Event, HashAlgo, RunConfig, TOOL_NAME, TOOL_VERSION, case, hash, i18n,
     time::human_duration,
 };
 use serde_json::{Value, json};
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
+
+/// Accepted ranges of the numeric options (a value outside is clamped, and the clamped value audited).
+pub const CLOCK_SKEW_RANGE: RangeInclusive<u64> = 0..=86_400;
+pub const TIMEOUT_RANGE: RangeInclusive<u64> = 5..=3_600;
+pub const MEMORY_RANGE: RangeInclusive<u64> = 128..=16_384;
+pub const MAX_MESSAGE_MB_RANGE: RangeInclusive<u64> = 1..=2_048;
+pub const MAX_MBOX_MESSAGES_RANGE: RangeInclusive<u64> = 1..=1_000_000;
+pub const MBOX_VARIANTS: [&str; 2] = ["mboxrd", "mboxo"];
+
+/// One change in section "3. Options"; each maps 1:1 onto a [`DomainOptions`] field and is audited under
+/// [`OptionChange::audit_name`] (with `at_utc`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum OptionChange {
+    /// DKIM key file given by the examiner; empty = none.
+    DkimKeys(String),
+    /// Fetch keys missing from the key file from today's DNS (weaker evidence).
+    OnlineDns(bool),
+    AddOwnDomain(String),
+    RemoveOwnDomain(String),
+    ExtractAttachments(bool),
+    ClockSkew(u64),
+    MboxVariant(String),
+    /// true = item reports only for flagged items, false = for every item.
+    ItemReportsFlaggedOnly(bool),
+    WorkerTimeout(u64),
+    WorkerMemory(u64),
+    /// In MiB (the core option is in bytes).
+    MaxMessageMb(u64),
+    MaxMboxMessages(u64),
+}
+
+impl OptionChange {
+    pub fn audit_name(&self) -> &'static str {
+        match self {
+            OptionChange::DkimKeys(_) => "ui_dkim_keys_changed",
+            OptionChange::OnlineDns(_) => "ui_online_dns_changed",
+            OptionChange::AddOwnDomain(_) => "ui_own_domain_added",
+            OptionChange::RemoveOwnDomain(_) => "ui_own_domain_removed",
+            OptionChange::ExtractAttachments(_) => "ui_extract_attachments_changed",
+            OptionChange::ClockSkew(_) => "ui_clock_skew_changed",
+            OptionChange::MboxVariant(_) => "ui_mbox_variant_changed",
+            OptionChange::ItemReportsFlaggedOnly(_) => "ui_item_reports_changed",
+            OptionChange::WorkerTimeout(_) => "ui_worker_timeout_changed",
+            OptionChange::WorkerMemory(_) => "ui_worker_memory_changed",
+            OptionChange::MaxMessageMb(_) => "ui_max_message_size_changed",
+            OptionChange::MaxMboxMessages(_) => "ui_max_mbox_messages_changed",
+        }
+    }
+}
+
+/// Normalises a typed own domain ("  @Example.ORG. " -> "example.org"); Err when it is not a domain name.
+pub fn normalize_domain(raw: &str) -> Result<String, String> {
+    let d = raw
+        .trim()
+        .trim_start_matches('@')
+        .trim_end_matches('.')
+        .to_lowercase();
+    let label_ok = |l: &str| {
+        !l.is_empty()
+            && l.len() <= 63
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.chars().all(|c| c.is_alphanumeric() || c == '-')
+    };
+    if d.len() > 253 || !d.contains('.') || !d.split('.').all(label_ok) {
+        return Err(format!("Not a domain name: {}", raw.trim()));
+    }
+    Ok(d)
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Phase {
@@ -36,6 +108,7 @@ pub struct Outcome {
     pub low: u64,
     pub info: u64,
     pub report: PathBuf,
+    pub report_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -85,6 +158,20 @@ pub struct GuiState {
     pub case_dir: String,
     /// Evidence ids reported by the last run (case folder only).
     pub evidence: Vec<EvidenceLink>,
+    /// Section "3. Options": the analysis options (core defaults; isolation = worker process).
+    pub options: DomainOptions,
+    /// Own domain being typed (added with [`OptionChange::AddOwnDomain`]).
+    pub own_domain_entry: String,
+    /// The finished run as read back from its audit log (results table + message viewer).
+    pub run_view: Option<RunView>,
+    /// Why the finished run could not be read back (shown instead of the results table).
+    pub run_view_error: Option<String>,
+    /// The message open in the viewer.
+    pub message: Option<MessageView>,
+    /// Why the last message could not be opened (digest mismatch, missing file, …).
+    pub message_error: Option<String>,
+    /// Last failure to write the reviewed run's review log (the view was then noted for the next run).
+    pub review_error: Option<String>,
 }
 
 impl Default for GuiState {
@@ -112,6 +199,13 @@ impl Default for GuiState {
             sign_password: String::new(),
             case_dir: String::new(),
             evidence: vec![],
+            options: DomainOptions::default(),
+            own_domain_entry: String::new(),
+            run_view: None,
+            run_view_error: None,
+            message: None,
+            message_error: None,
+            review_error: None,
         }
     }
 }
@@ -239,6 +333,96 @@ impl GuiState {
         }
     }
 
+    /// Applies one option change (numbers clamped to their range, domains normalised) and audits it when
+    /// the value changed. Ok(false) = nothing changed; Err = refused (e.g. not a domain name), nothing audited.
+    pub fn set_option(&mut self, c: OptionChange) -> Result<bool, String> {
+        fn put<T: PartialEq>(slot: &mut T, v: T) -> bool {
+            let changed = *slot != v;
+            *slot = v;
+            changed
+        }
+        let o = &mut self.options;
+        let (changed, value): (bool, Value) = match &c {
+            OptionChange::DkimKeys(p) => {
+                let p = p.trim().trim_matches('"').to_string();
+                let new = (!p.is_empty()).then(|| PathBuf::from(&p));
+                (
+                    put(&mut o.dkim_keys, new),
+                    if p.is_empty() { Value::Null } else { json!(p) },
+                )
+            }
+            OptionChange::OnlineDns(v) => (put(&mut o.online_dns, *v), json!(v)),
+            OptionChange::AddOwnDomain(raw) => {
+                let d = normalize_domain(raw)?;
+                let added = !o.own_domains.contains(&d);
+                if added {
+                    o.own_domains.push(d.clone());
+                }
+                self.own_domain_entry.clear();
+                (added, json!(d))
+            }
+            OptionChange::RemoveOwnDomain(d) => {
+                let before = o.own_domains.len();
+                o.own_domains.retain(|x| x != d);
+                (o.own_domains.len() != before, json!(d))
+            }
+            OptionChange::ExtractAttachments(v) => (put(&mut o.extract_attachments, *v), json!(v)),
+            OptionChange::ClockSkew(v) => {
+                let v = (*v).clamp(*CLOCK_SKEW_RANGE.start(), *CLOCK_SKEW_RANGE.end());
+                (put(&mut o.clock_skew_s, v), json!(v))
+            }
+            OptionChange::MboxVariant(v) => {
+                if !MBOX_VARIANTS.contains(&v.as_str()) {
+                    return Err(format!("Unknown mbox variant: {v}"));
+                }
+                (put(&mut o.mbox_variant, v.clone()), json!(v))
+            }
+            OptionChange::ItemReportsFlaggedOnly(v) => (
+                put(&mut o.item_reports_flagged_only, *v),
+                json!(if *v { "flagged" } else { "all" }),
+            ),
+            OptionChange::WorkerTimeout(v) => {
+                let v = (*v).clamp(*TIMEOUT_RANGE.start(), *TIMEOUT_RANGE.end());
+                (put(&mut o.worker_timeout_s, v), json!(v))
+            }
+            OptionChange::WorkerMemory(v) => {
+                let v = (*v).clamp(*MEMORY_RANGE.start(), *MEMORY_RANGE.end());
+                (put(&mut o.worker_memory_mb, v), json!(v))
+            }
+            OptionChange::MaxMessageMb(v) => {
+                let v = (*v).clamp(*MAX_MESSAGE_MB_RANGE.start(), *MAX_MESSAGE_MB_RANGE.end());
+                (put(&mut o.max_message_bytes, v * 1024 * 1024), json!(v))
+            }
+            OptionChange::MaxMboxMessages(v) => {
+                let v = (*v).clamp(
+                    *MAX_MBOX_MESSAGES_RANGE.start(),
+                    *MAX_MBOX_MESSAGES_RANGE.end(),
+                );
+                (put(&mut o.max_mbox_messages, v), json!(v))
+            }
+        };
+        if changed {
+            self.note(c.audit_name(), json!({"value": value}));
+        }
+        Ok(changed)
+    }
+
+    /// The configured maximum message size in MiB (as shown in the options).
+    pub fn max_message_mb(&self) -> u64 {
+        self.options.max_message_bytes / (1024 * 1024)
+    }
+
+    /// Short form of the options, for the settings line in environment.json and `ui_start_clicked`.
+    pub fn options_json(&self) -> Value {
+        let o = &self.options;
+        json!({"dkim_keys": o.dkim_keys.as_ref().map(|p| p.display().to_string()), "online_dns": o.online_dns,
+            "own_domains": o.own_domains, "extract_attachments": o.extract_attachments,
+            "clock_skew_s": o.clock_skew_s, "mbox_variant": o.mbox_variant,
+            "item_reports": if o.item_reports_flagged_only { "flagged" } else { "all" },
+            "worker_timeout_s": o.worker_timeout_s, "worker_memory_mb": o.worker_memory_mb,
+            "max_message_bytes": o.max_message_bytes, "max_mbox_messages": o.max_mbox_messages})
+    }
+
     /// Rule: with a case folder the output folder is `<case>/runs/<tool>/<RUN-ID>` and cannot be edited.
     pub fn set_case_dir(&mut self, path: &str) {
         let path = path.trim().trim_matches('"').to_string();
@@ -327,10 +511,15 @@ impl GuiState {
         if !self.sign_cert.is_empty() && !std::path::Path::new(&self.sign_cert).is_file() {
             return Err(format!("Signing certificate not found: {}", self.sign_cert));
         }
+        if let Some(k) = &self.options.dkim_keys
+            && !k.is_file()
+        {
+            return Err(format!("DKIM key file not found: {}", k.display()));
+        }
         let mut preamble = self.ui_actions.clone();
         preamble.push(("ui_start_clicked".into(), json!({"algorithms": self.selected, "lang": self.lang, "recursive": self.recursive,
             "inputs": self.inputs.len(), "jurisdiction": self.jurisdiction, "timestamp": self.timestamp,
-            "pdf_signing": !self.sign_cert.is_empty(), "case_dir": if self.out_locked() { json!(self.case_dir.trim()) } else { Value::Null },
+            "pdf_signing": !self.sign_cert.is_empty(), "options": self.options_json(), "case_dir": if self.out_locked() { json!(self.case_dir.trim()) } else { Value::Null },
             "at_utc": rv_mailauth_core::time::utc_now()})));
         let settings = vec![
             format!("{} (gui)", TOOL_NAME),
@@ -362,6 +551,7 @@ impl GuiState {
                 }
             ),
             format!("jurisdiction={}", self.jurisdiction),
+            format!("options={}", self.options_json()),
             format!(
                 "tsa={}",
                 if self.timestamp {
@@ -420,7 +610,10 @@ impl GuiState {
             },
             evidence_ids: vec![],
             case_role: CASE_ROLE,
-            domain: Default::default(),
+            domain: DomainOptions {
+                fetched_keys: vec![],
+                ..self.options.clone()
+            },
         })
     }
 
@@ -431,6 +624,11 @@ impl GuiState {
         self.warnings.clear();
         self.outcome = None;
         self.evidence.clear();
+        self.run_view = None;
+        self.run_view_error = None;
+        self.message = None;
+        self.message_error = None;
+        self.review_error = None;
         // Recorded actions now belong to this run's audit log.
         self.ui_actions.clear();
     }
@@ -506,6 +704,7 @@ impl GuiState {
                     low: *low,
                     info: *info,
                     report: PathBuf::from(report_dir).join(format!("statistics.{}.html", lang)),
+                    report_dir: PathBuf::from(report_dir),
                     log_dir: PathBuf::from(log_dir),
                 });
                 self.phase = if *cancelled {
@@ -517,6 +716,123 @@ impl GuiState {
             }
             _ => {}
         }
+    }
+
+    /// Reads the finished run back from its audit log (results table); called once the run is over.
+    pub fn load_results(&mut self) {
+        let Some(o) = &self.outcome else { return };
+        match RunView::load(&o.report_dir, &o.log_dir) {
+            Ok(v) => {
+                self.run_view = Some(v);
+                self.run_view_error = None;
+            }
+            Err(e) => {
+                self.run_view = None;
+                self.run_view_error = Some(e);
+            }
+        }
+        self.message = None;
+        self.message_error = None;
+    }
+
+    /// "Open" on a results row: the message is shown only when headers.json and dkim.json match the digests in
+    /// the audit log. Both outcomes go to the run's review log (`ui_message_viewed` / `ui_message_refused`).
+    pub fn open_message(&mut self, row: usize) -> bool {
+        let Some(run) = &self.run_view else {
+            return false;
+        };
+        let Some(r) = run.rows.get(row).cloned() else {
+            return false;
+        };
+        let run_id = run.run_id.clone();
+        let mut details = json!({"item": r.item, "index": r.index, "message": r.message, "run_id": run_id,
+                                 "at_utc": rv_mailauth_core::time::utc_now()});
+        let opened = MessageView::open(run, row);
+        let ok = opened.is_ok();
+        match opened {
+            Ok(v) => {
+                details["files"] = json!(
+                    v.files
+                        .iter()
+                        .map(|(f, h)| json!({"file": f, "sha256": h}))
+                        .collect::<Vec<_>>()
+                );
+                details["digest_ok"] = json!(true);
+                self.message = Some(v);
+                self.message_error = None;
+                self.record_review("ui_message_viewed", details);
+            }
+            Err(e) => {
+                details["digest_ok"] = json!(false);
+                details["reason"] = json!(e);
+                self.message = None;
+                self.message_error = Some(e);
+                self.record_review("ui_message_refused", details);
+            }
+        }
+        ok
+    }
+
+    pub fn close_message(&mut self) {
+        self.message = None;
+        self.message_error = None;
+    }
+
+    /// Writes one entry to the reviewed run's hash-chained review log (`review.jsonl`, anchored to its
+    /// `run_finished`). If that fails, the entry falls back to the next run's audit preamble and the error is
+    /// kept for the status line.
+    fn record_review(&mut self, action: &str, details: Value) {
+        let actor = if self.actor.trim().is_empty() {
+            rv_mailauth_core::env::os_user()
+        } else {
+            self.actor.trim().to_string()
+        };
+        let written = match self.outcome.as_ref().map(|o| o.log_dir.clone()) {
+            Some(dir) => rv_mailauth_core::review::append(&dir, &actor, action, details.clone())
+                .map(|_| ())
+                .map_err(|e| format!("{}: {}", dir.display(), e)),
+            None => Err("no finished run in this window".to_string()),
+        };
+        match written {
+            Ok(()) => self.review_error = None,
+            Err(e) => {
+                self.review_error = Some(e);
+                self.note(action, details);
+            }
+        }
+    }
+
+    /// Findings of the open message in the interface language, most severe first.
+    pub fn message_findings(&self) -> Vec<FindingText> {
+        let cat = i18n::catalog(&self.ui_lang);
+        let mut out: Vec<FindingText> = self
+            .message
+            .as_ref()
+            .map(|m| m.findings.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .map(|f| {
+                let (title, shows, not_proves) = cat.finding(&f.code, &f.params);
+                FindingText {
+                    severity: f.severity,
+                    code: f.code.clone(),
+                    title,
+                    shows,
+                    not_proves,
+                }
+            })
+            .collect();
+        out.sort_by_key(|f| std::cmp::Reverse(f.severity));
+        out
+    }
+
+    pub fn severity_name(&self, s: Severity) -> String {
+        i18n::catalog(&self.ui_lang).severity(s.key())
+    }
+
+    /// Results-table status in the interface language (ok / attention / problem).
+    pub fn status_name(&self, status: &str) -> String {
+        self.tr(&format!("status_{status}"))
     }
 
     pub fn fail(&mut self, msg: String) {
@@ -564,6 +880,16 @@ impl GuiState {
             self.fraction() * 100.0
         )
     }
+}
+
+/// One finding as the viewer lists it: what it shows and what it does not prove.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FindingText {
+    pub severity: Severity,
+    pub code: String,
+    pub title: String,
+    pub shows: String,
+    pub not_proves: String,
 }
 
 #[cfg(test)]
@@ -769,5 +1095,194 @@ mod tests {
                 && log.contains("\"frontend\":\"gui\"")
         );
         let _ = std::fs::remove_dir_all(&ev);
+    }
+
+    #[test]
+    fn option_defaults_are_the_core_defaults() {
+        let s = GuiState::default();
+        assert_eq!(s.options, DomainOptions::default());
+        assert_eq!(
+            s.options.isolation,
+            rv_mailauth_core::model::Isolation::Worker
+        );
+        assert!(!s.options.online_dns && s.options.dkim_keys.is_none());
+        assert_eq!(s.max_message_mb(), 200);
+        let mut s = s;
+        s.add_input(PathBuf::from("."));
+        assert_eq!(s.to_config().unwrap().domain, DomainOptions::default());
+    }
+
+    #[test]
+    fn every_option_change_is_audited_with_its_time() {
+        let mut s = GuiState::default();
+        let keys = std::env::temp_dir().join(format!("rv-gui-keys-{}.txt", std::process::id()));
+        std::fs::write(&keys, "# none\n").unwrap();
+        let changes = [
+            OptionChange::DkimKeys(format!("\"{}\"", keys.display())),
+            OptionChange::OnlineDns(true),
+            OptionChange::AddOwnDomain("  @Example.ORG. ".into()),
+            OptionChange::AddOwnDomain("acme.example".into()),
+            OptionChange::RemoveOwnDomain("acme.example".into()),
+            OptionChange::ExtractAttachments(true),
+            OptionChange::ClockSkew(999_999),
+            OptionChange::MboxVariant("mboxo".into()),
+            OptionChange::ItemReportsFlaggedOnly(true),
+            OptionChange::WorkerTimeout(1),
+            OptionChange::WorkerMemory(2048),
+            OptionChange::MaxMessageMb(50),
+            OptionChange::MaxMboxMessages(0),
+        ];
+        for c in &changes {
+            assert_eq!(s.set_option(c.clone()), Ok(true), "{c:?}");
+        }
+        let names: Vec<&str> = s.ui_actions.iter().map(|(a, _)| a.as_str()).collect();
+        assert_eq!(
+            names,
+            changes.iter().map(|c| c.audit_name()).collect::<Vec<_>>()
+        );
+        assert!(
+            s.ui_actions
+                .iter()
+                .all(|(_, d)| d["at_utc"].as_str().is_some_and(|t| t.ends_with('Z')))
+        );
+        let o = &s.options;
+        assert_eq!(o.dkim_keys.as_deref(), Some(keys.as_path()));
+        assert_eq!(o.own_domains, vec!["example.org".to_string()]);
+        assert_eq!(o.clock_skew_s, 86_400, "clamped");
+        assert_eq!(o.worker_timeout_s, 5, "clamped");
+        assert_eq!(o.max_message_bytes, 50 * 1024 * 1024);
+        assert_eq!(o.max_mbox_messages, 1, "clamped");
+        assert_eq!(s.ui_actions[2].1["value"], "example.org");
+        assert_eq!(s.ui_actions[6].1["value"], 86_400);
+        assert_eq!(s.ui_actions[8].1["value"], "flagged");
+
+        // No change, a duplicate and refused values are not audited.
+        let n = s.ui_actions.len();
+        assert_eq!(s.set_option(OptionChange::OnlineDns(true)), Ok(false));
+        assert_eq!(
+            s.set_option(OptionChange::AddOwnDomain("EXAMPLE.org".into())),
+            Ok(false)
+        );
+        assert!(
+            s.set_option(OptionChange::AddOwnDomain("not a domain".into()))
+                .is_err()
+        );
+        assert!(
+            s.set_option(OptionChange::AddOwnDomain("localhost".into()))
+                .is_err()
+        );
+        assert!(
+            s.set_option(OptionChange::MboxVariant("mboxcl2".into()))
+                .is_err()
+        );
+        assert_eq!(s.ui_actions.len(), n);
+
+        // The run gets exactly these options, and ui_start_clicked records them.
+        s.add_input(PathBuf::from("."));
+        let cfg = s.to_config().unwrap();
+        assert_eq!(cfg.domain, s.options);
+        let (_, start) = cfg.preamble.last().unwrap();
+        assert_eq!(start["options"]["online_dns"], true);
+        assert_eq!(start["options"]["own_domains"][0], "example.org");
+        assert!(cfg.command_line.iter().any(|l| l.starts_with("options=")));
+
+        // A key file that is gone is refused before the run.
+        std::fs::remove_file(&keys).unwrap();
+        assert!(
+            s.to_config()
+                .unwrap_err()
+                .contains("DKIM key file not found")
+        );
+        assert_eq!(
+            s.set_option(OptionChange::DkimKeys(String::new())),
+            Ok(true)
+        );
+        assert!(s.options.dkim_keys.is_none() && s.to_config().is_ok());
+        assert_eq!(s.ui_actions.last().unwrap().1["value"], Value::Null);
+    }
+
+    /// The sample evidence with its key file and own domain example.org, analysed from GUI settings.
+    pub(crate) fn sample_run(tag: &str) -> (GuiState, PathBuf) {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let out = std::env::temp_dir().join(format!("rv-gui-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let mut s = GuiState {
+            timestamp: false,
+            ..Default::default()
+        };
+        s.add_input(root.join("examples/sample/evidence"));
+        s.set_option(OptionChange::DkimKeys(
+            root.join("examples/sample/dkim-keys.txt")
+                .display()
+                .to_string(),
+        ))
+        .unwrap();
+        s.set_option(OptionChange::AddOwnDomain("example.org".into()))
+            .unwrap();
+        s.out_dir = out.display().to_string();
+        let cfg = s.to_config().unwrap();
+        s.start();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        rv_mailauth_core::run(&cfg, &mut |e| s.apply(e), &cancel).unwrap();
+        s.load_results();
+        (s, out)
+    }
+
+    #[test]
+    fn results_table_and_message_viewer_from_a_sample_run() {
+        let (mut s, out) = sample_run("viewer");
+        assert_eq!(s.phase, Phase::Finished);
+        let run = s
+            .run_view
+            .clone()
+            .expect("run read back from the audit log");
+        assert!(s.run_view_error.is_none());
+        let labels: Vec<String> = run.rows.iter().map(|r| r.label()).collect();
+        // The mbox (item 12) is followed by its three messages.
+        let at = labels.iter().position(|l| l == "12").unwrap();
+        assert_eq!(&labels[at..at + 4], ["12", "12.1", "12.2", "12.3"]);
+        assert_eq!(run.rows[at + 1].name, "12-mailbox.mbox #1");
+        assert_eq!(run.rows[at + 1].offset, Some(0));
+        assert!(!run.rows[at].viewable() && run.rows[at + 1].viewable());
+
+        let body = run
+            .rows
+            .iter()
+            .position(|r| r.name == "03-body-edited.eml")
+            .unwrap();
+        assert_eq!(run.rows[body].status, "problem");
+        assert_eq!(run.rows[body].counts(), [1, 0, 0, 0]);
+        assert!(s.open_message(body));
+        let m = s.message.clone().unwrap();
+        assert_eq!(m.dkim.signatures[0].result, "body_hash_mismatch");
+        assert_eq!(m.dkim.signatures[0].key_source, "key_file");
+        assert!(!m.hops.is_empty() && m.addresses[0].role == "addr_from");
+        let f = s.message_findings();
+        assert_eq!(f[0].code, "DKIM_BODY_HASH_MISMATCH");
+        assert!(!f[0].shows.is_empty() && !f[0].not_proves.is_empty());
+        assert_ne!(f[0].shows, f[0].not_proves);
+
+        // Opening is recorded in the run's review log, chained to run_finished.
+        let log_dir = s.outcome.as_ref().unwrap().log_dir.clone();
+        assert_eq!(rv_mailauth_core::review::verify(&log_dir), Ok(Some(1)));
+        let review = std::fs::read_to_string(log_dir.join("review.jsonl")).unwrap();
+        assert!(review.contains("\"ui_message_viewed\"") && review.contains("headers.json"));
+        assert!(s.review_error.is_none() && s.ui_actions.is_empty());
+
+        // The reply-to trap highlights the Reply-To address.
+        let trap = run
+            .rows
+            .iter()
+            .position(|r| r.name == "07-reply-to-trap.eml")
+            .unwrap();
+        assert!(s.open_message(trap));
+        let m = s.message.as_ref().unwrap();
+        assert!(
+            m.addresses
+                .iter()
+                .any(|a| a.role == "addr_reply_to" && a.mismatch)
+        );
+        assert_eq!(rv_mailauth_core::review::verify(&log_dir), Ok(Some(2)));
+        let _ = std::fs::remove_dir_all(&out);
     }
 }
