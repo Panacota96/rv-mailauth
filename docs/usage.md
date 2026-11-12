@@ -24,7 +24,7 @@ sequenceDiagram
     participant C as Case folder
     participant P as Analysis tool (e.g. rv-pdfauth)
     participant T as TSA
-    X->>H: scan --case-dir CASE --case ID -i E:\export
+    X->>H: analyze --case-dir CASE --case ID -i E:\export
     H->>C: case.json, registry E0001…, case-log run_started / evidence_registered
     H->>T: audit chain head
     T-->>H: RFC 3161 token
@@ -60,7 +60,7 @@ TSA (`tests/fake_tsa.py`); paths are shortened.
 ### 2.1 Intake: register the evidence
 
 ```powershell
-rv-mailauth scan --case-dir D:\cases\CASE-2026-014 --case CASE-2026-014 --jurisdiction co `
+rv-mailauth analyze --case-dir D:\cases\CASE-2026-014 --case CASE-2026-014 --jurisdiction co `
     -i E:\export -r --hash sha256,md5 --actor "Ana Ruiz" --sign-cert C:\certs\ana-ruiz.p12
 ```
 
@@ -165,7 +165,7 @@ file. It relies on two entry points of RV MailAuth:
 | `schema` | `rakvor.describe/1` |
 | `tool`, `title`, `version` | `rv-mailauth`, `RV MailAuth`, the product version (`version.txt`) |
 | `role` | `intake` (registers evidence in the case folder) |
-| `main_verb` | `scan`: the command that does the main work |
+| `main_verb` | `analyze`: the command that does the main work |
 | `accepts` | `extensions` (lower case, no dot) and content `signatures` (`format` + `match`: hex bytes at an offset); `"*"` = any file |
 | `case_formats`, `log_formats` | `rakvor.case/1`; `rakvor.audit/1` = `logs/audit.jsonl`, `rakvor.review/1` = `logs/review.jsonl` |
 | `cli_exe`, `gui_exe` | `rv-mailauth.exe`, `rv-mailauth-gui.exe` |
@@ -235,8 +235,8 @@ conclude" is the overreach to avoid in a report. The exact wording printed in re
 The same command works standalone for a quick inventory (no registry, no case log):
 
 ```powershell
-rv-mailauth scan -i D:\evidence -r --hash sha256,md5 --lang all --case CASE-2026-014 --out D:\work\inventory
-rv-mailauth scan --input-list files.txt --progress jsonl > events.jsonl      # one JSON event per line on stdout
+rv-mailauth analyze -i D:\evidence -r --hash sha256,md5 --lang all --case CASE-2026-014 --out D:\work\inventory
+rv-mailauth analyze --input-list files.txt --progress jsonl > events.jsonl      # one JSON event per line on stdout
 ```
 
 `--progress jsonl` prints every event (`run_started`, `item_started`, `item_hashed`, `progress` with elapsed time
@@ -304,7 +304,7 @@ Signing certificate* and *Certificate password* (kept in memory only).
 $s = Read-Host "Certificate password" -AsSecureString
 $env:RV_SIGN_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
-rv-mailauth scan --case-dir D:\cases\CASE-2026-014 -i E:\export -r --sign-cert C:\certs\ana-ruiz.p12
+rv-mailauth analyze --case-dir D:\cases\CASE-2026-014 -i E:\export -r --sign-cert C:\certs\ana-ruiz.p12
 Remove-Item Env:RV_SIGN_PASSWORD
 (Get-PfxCertificate C:\certs\ana-ruiz.p12).GetCertHashString("SHA256")   # publish this fingerprint
 ```
@@ -380,7 +380,7 @@ SHA256).Hash.ToLower()` and search the value in `audit.jsonl`.
 
 | Command | 0 | 1 | 2 | 3 | 130 |
 | --- | --- | --- | --- | --- | --- |
-| `scan` | done, no high finding | runtime error (input not found, output not writable, wrong certificate password, case log locked) | usage error (unknown option or algorithm, three algorithms, unknown language; with `--case-dir`: another case's folder, `--case` missing at creation, unknown evidence id) | done, ≥ 1 high finding; or the case folder fails verification (nothing written) | cancelled (Ctrl+C), partial reports written |
+| `analyze` | done, no high finding | runtime error (input not found, output not writable, wrong certificate password, case log locked) | usage error (unknown option or algorithm, three algorithms, unknown language; with `--case-dir`: another case's folder, `--case` missing at creation, unknown evidence id) | done, ≥ 1 high finding; or the case folder fails verification (nothing written) | cancelled (Ctrl+C), partial reports written |
 | `verify-log` | intact | log unreadable | — | broken chain, token mismatch, or truncated (shorter than its timestamp or case record) | — |
 | `verify-case` | case intact (warnings printed) | not a case folder (no `case.json`) | — | at least one check failed (with `--rehash`: an evidence file differs from the registry) | — |
 | `timestamp` | obtained and logged | TSA unreachable (nothing changed) | — | log missing, broken or unreadable (nothing added) | — |

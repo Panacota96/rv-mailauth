@@ -34,7 +34,7 @@ computed independently with Python's `hashlib` and `blake3`.
 ```mermaid
 flowchart LR
     G["tests/make_samples.py<br/>(throwaway keys, discarded)"] --> E["evidence/ (16 files)"] & K["dkim-keys.txt (public)"] & X["expected_findings.json"]
-    E --> S["rv-mailauth scan --hash sha256,md5 --lang all"]
+    E --> S["rv-mailauth analyze --hash sha256,md5 --lang all"]
     K --> S
     S --> O["out/logs/RUN-ID · out/reports/RUN-ID"]
     O --> V["rv-mailauth verify-log → OK"]

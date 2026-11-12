@@ -189,8 +189,8 @@ duplicates, reports and the audit chain:
 # installer (no script installed): run it by hand into a temporary folder
 $app = "$env:LOCALAPPDATA\Programs\Rakvor\RV MailAuth"
 $out = Join-Path $env:TEMP "rv-mailauth-check"
-rv-mailauth scan -i "$app\examples\sample\evidence" --hash sha256,md5 --out $out --progress none --no-timestamp
-$LASTEXITCODE                                  # 0
+rv-mailauth analyze -i "$app\examples\sample\evidence" --hash sha256,md5 --out $out --progress none --no-timestamp
+$LASTEXITCODE                                  # 3: the sample holds tampered messages (expected_findings.json)
 rv-mailauth verify-log (Get-ChildItem "$out\logs" | Select-Object -Last 1).FullName   # OK … chain intact
 ```
 
