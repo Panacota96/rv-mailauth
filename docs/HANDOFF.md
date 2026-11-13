@@ -49,8 +49,12 @@ flowchart LR
 
 **Shared code.** `src/core/src/trust.rs` is byte-identical in rv-hub, rv-hashinv, rv-rsmf, rv-certcheck,
 rv-imgauth, rv-pdfauth, rv-mailauth and the forge template; the installer AppId table in
-`src/cli/tests/packaging.rs` and the `deny.toml` policy are shared too. Change all copies in one go and compare
-their SHA-256; never edit them here alone.
+`src/cli/tests/packaging.rs` and the `deny.toml` policy are shared too. `src/core/src/outputs.rs` (re-hash of the
+outputs an audit log records, used by `verify-log` and `verify-case`) is shared the same way, byte-identical with
+rv-hashinv: it depends only on `crate::hash` and `serde_json`; its module documentation lists every audit shape of
+every tool (here `output_written` with `details.file` and `details.hashes`; the `keys import` entry has no file in
+the run and is skipped with the reason). Change all copies in one go and compare their SHA-256; never edit them
+here alone.
 
 ## 3. Everyday commands
 
@@ -109,6 +113,9 @@ logged; no GPL/AGPL/LGPL components; tools report signals, not verdicts.
 - No validated error rates for the BEC heuristics on a documented corpus (gap G5); TSA revocation is never checked
   (G18, [ADR 0002](adr/0002-tsa-token-verification.md)); RUSTSEC-2023-0071 stays an exception until `cms` 0.3 and a
   mail-auth on rsa 0.10 ([ADR 0003](adr/0003-dependency-advisories.md)).
+- Recorded outputs (gap G19, closed): `verify-log` and `verify-case` re-hash every report, per-message output,
+  `hashes.csv` and `environment.json` the audit log records (`src/core/src/outputs.rs`). The Python oracle
+  `tests/verify_chain.py` does not re-hash them yet; the script in [usage.md](usage.md#8-verifying-a-run) does.
 
 The gap table in [admissibility.md](admissibility.md#consolidated-gap-list) lists every known limitation with its
 owner (engineering, counsel, examiner, firm).

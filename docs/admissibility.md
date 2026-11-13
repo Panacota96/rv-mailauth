@@ -428,7 +428,7 @@ Owners: **Eng.** = engineering, **Counsel**, **Examiner**, **Firm** = Rakvor man
 | G14 | CPP renumbering on 1 Jan. 2029 | FR section | Cite with the version date | Concordance table | Counsel |
 | G17 | Source access without a defined protocol; LICENSE is a draft pending legal review | CO-P13, FR-P7 | Provide the tagged source on request | NDA / inspection protocol | Firm + Counsel |
 | G18 | `verify-log` does not check TSA revocation, policy OID or accuracy | EU-2 | `openssl ts -verify` as a second check; revocation established separately from CRL/OCSP evidence covering genTime | Revocation and policy checks | Eng. |
-| G19 | No command re-verifies every report and output file against the audited digests (the GUI viewer re-checks `headers.json` and `dkim.json` before showing them) | ISO-1 | Script in [usage.md](usage.md#8-verifying-a-run) | `verify-run` command | Eng. |
+| G19 | Re-verification of the run's outputs against the digests in the audit log — **closed**: `verify-log` and `verify-case` re-hash every file the audit log records (reports, per-message `headers.json` / `dkim.json` / `mbox_index.json` / attachments, `hashes.csv`, `environment.json`) with every recorded algorithm; an edited, deleted or replaced output, or a recorded path leading outside the run folder, is a problem (exit 3) named in the output ([src/core/src/outputs.rs](../src/core/src/outputs.rs)). The key file of `keys import` (written outside the run folder) is listed as not re-hashed; files the run never recorded are not checked; kept for numbering | — | — | — | — |
 | G22 | Release binaries not bit-for-bit reproducible | ISO-3 | Provenance attestation + functional equivalence | Path remapping, deterministic packaging | Eng. |
 | G23 | Windows: no OS-level network block for the worker (no network code, but no sandbox) | CO-D1 | Offline workstation or firewall rule | AppContainer / WFP | Eng. |
 | G-MAIL1 | **Key at sending time** cannot be established by the tool; it rests on the archive's provenance | CO-L2, FR-C1, US-1 | Document each key's source and validity dates; disclose the key file (SHA-256 in every run); avoid `--online` or disclose it | Key-provenance fields in `keys import` (source, validity window) printed in the report | Examiner + Eng. |
@@ -456,7 +456,8 @@ Owners: **Eng.** = engineering, **Counsel**, **Examiner**, **Firm** = Rakvor man
 7. **Own domains** given (`--own-domain`) for BEC cases, and listed in the report.
 8. **Workstation clock** synchronised; time source noted.
 9. **The run is complete** (`run_finished`) and `rv-mailauth verify-log <log folder>` prints OK, including the
-   review entries; `python tests/verify_chain.py <log folder>` exits 0.
+   review entries and the `outputs:` line (every report and per-message output re-hashed against
+   the audited digests); `python tests/verify_chain.py <log folder>` exits 0.
 10. **Timestamp** obtained and checked (`verify-log --tsa-ca`, `openssl ts -verify`), and the TSA certificate's
     revocation status at genTime established from CRL/OCSP evidence covering genTime, kept with the case.
 11. **No `PARSER_FAILED`, `FILE_STRUCTURE_DAMAGED` or expired-signature `DKIM_SIGNATURE_NOT_EVALUATED` left
