@@ -1146,6 +1146,12 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             println!("  - {}", p);
         }
     }
+    if let Some(o) = &v.outputs {
+        println!("    {}", o.summary());
+        for s in o.skipped_lines() {
+            println!("    {}", s);
+        }
+    }
     for w in &v.warnings {
         println!("  warning: {}", w);
     }
@@ -1179,6 +1185,10 @@ fn verify_case(dir: PathBuf, rehash: bool) -> u8 {
         if v.review_entries > 0 {
             println!("    review entries: {}", v.review_entries);
         }
+        println!(
+            "    outputs: {} verified of {} recorded by the runs' audit logs",
+            v.outputs_verified, v.outputs_recorded
+        );
         if let Some(r) = &rehashed {
             println!(
                 "    re-hashed {} of {} registered items: {} match the registry",
@@ -1194,6 +1204,10 @@ fn verify_case(dir: PathBuf, rehash: bool) -> u8 {
         for p in &v.problems {
             println!("  - {}", p);
         }
+        println!(
+            "    outputs: {} verified of {} recorded by the runs' audit logs",
+            v.outputs_verified, v.outputs_recorded
+        );
         if let Some(r) = &rehashed {
             println!(
                 "    re-hashed {} of {} registered items: {} match the registry",
