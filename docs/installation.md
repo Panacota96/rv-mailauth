@@ -209,7 +209,7 @@ of `12-mailbox.mbox`); the exact codes per item are in `examples\sample\expected
 MD5 of every file with `expected_hashes.csv` (`hashes.csv matches expected_hashes.csv (16 files: size, SHA-256,
 MD5)`), and exit 3 on any difference. For the installer (no script installed), compare `$out\logs\<RUN-ID>\hashes.csv`
 with the source tree's `expected_hashes.csv`, or run `python tests\verify_chain.py <log folder>` from the source
-tree, which re-hashes every file of `hashes.csv`.
+tree, which re-hashes every file of `hashes.csv` and every output the audit log records.
 
 Keep the console output and the run folder as the record of this verification.
 

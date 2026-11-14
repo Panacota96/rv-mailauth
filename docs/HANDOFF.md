@@ -115,7 +115,8 @@ logged; no GPL/AGPL/LGPL components; tools report signals, not verdicts.
   mail-auth on rsa 0.10 ([ADR 0003](adr/0003-dependency-advisories.md)).
 - Recorded outputs (gap G19, closed): `verify-log` and `verify-case` re-hash every report, per-message output,
   `hashes.csv` and `environment.json` the audit log records (`src/core/src/outputs.rs`). The Python oracle
-  `tests/verify_chain.py` does not re-hash them yet; the script in [usage.md](usage.md#8-verifying-a-run) does.
+  `tests/verify_chain.py` re-hashes them too (same rules, written independently), as does the script in
+  [usage.md](usage.md#8-verifying-a-run).
 
 The gap table in [admissibility.md](admissibility.md#consolidated-gap-list) lists every known limitation with its
 owner (engineering, counsel, examiner, firm).
