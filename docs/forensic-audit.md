@@ -40,7 +40,7 @@ Editing a value changes that entry's hash; deleting or re-ordering breaks `seq` 
 Verify with either implementation:
 
 ```bash
-rv-mailauth verify-log rakvor-out/logs/<RUN-ID>          # exit 0 intact, 3 broken or truncated
+rv-mailauth verify-log rakvor-out/logs/<RUN-ID>          # exit 0 intact, 3 broken, truncated or an output changed
 python tests/verify_chain.py rakvor-out/logs/<RUN-ID>   # independent re-implementation (chain + hashes.csv)
 ```
 
@@ -75,6 +75,42 @@ The output names the last anchored entry. A standalone run timestamps the head *
 record `verify-log` prints `truncation not detectable without a timestamp or case record` (exit 0: nothing
 contradicts the log, but nothing vouches for its length). Deleting the timestamp files **and** the entries that
 refer to them is detectable only through the case log or a head kept elsewhere.
+
+### Recorded outputs: the files the log vouches for
+
+The chain proves that the *digests* recorded in the log are unchanged, not that the files they describe still
+have them. `verify-log` (and `verify-case`, for every run) therefore re-hashes every output file the log records
+and compares it with every digest recorded for it ([src/core/src/outputs.rs](../src/core/src/outputs.rs), shared
+byte-identical by every Rakvor tool):
+
+```mermaid
+flowchart LR
+    A["audit.jsonl (chain intact)"] --> R["recorded files<br/>path → digests; the latest entry wins"]
+    R --> S{"safe relative path,<br/>inside the run folder?"}
+    S -- no --> X["problem: rejected, not read"]
+    S -- yes --> E{"exists, regular file?"}
+    E -- no --> M["problem: missing / replaced"]
+    E -- yes --> H{"every recorded<br/>digest equal?"}
+    H -- no --> C["problem: changed (named, both digests)"]
+    H -- yes --> V["verified"]
+```
+
+| Entry | File (run folder) |
+| --- | --- |
+| `environment_recorded`, `hash_register_written` | `logs/environment.json`, `logs/hashes.csv` |
+| `output_written` (`details.file`, `details.hashes`) | `reports/items/<folder>/headers.json`, `dkim.json`, `mbox_index.json`, extracted attachments |
+| `item_reports_written` | `reports/<folder>/<file>` for every report file of the item |
+| `statistics_report_written` | `reports/statistics.json` and every `statistics.<LANG>.html/.pdf` |
+| `timestamp_obtained` | not re-hashed here: the token is checked by the timestamp verification below |
+| `output_written` of `keys import` (no `details.file`) | not re-hashed: the key file is written outside the run folder, at a path the operator chose (its SHA-256 is in the entry) |
+
+A standalone run's folders are `<OUT>/logs/<RUN-ID>` and `<OUT>/reports/<RUN-ID>` (each its own boundary); a
+case run's are `<CASE>/runs/<tool>/<RUN-ID>/logs` and `/reports` (the run folder is the boundary). A recorded path
+that is absolute, contains `..`, a drive, `\` or `:`, or resolves outside the boundary through a symlink or
+junction is rejected and never read. Output: `outputs: N verified of M recorded (algorithms)`, then any file not
+re-hashed with the reason. Files the run never recorded (added to the folder later) are not checked; the
+human-readable `audit.log` is a copy that nothing vouches for (read `audit.jsonl`), and `review.jsonl` is verified
+by its own chain.
 
 ## Trusted timestamp (RFC 3161)
 
@@ -189,7 +225,7 @@ flowchart LR
 
 | 27037 principle / activity | How RV MailAuth supports it |
 | --- | --- |
-| Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash; `verify-log` checks the chain and its end against the timestamp and the case log |
+| Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash; `verify-log` checks the chain and its end against the timestamp and the case log, and re-hashes every output the log records |
 | Repeatability (5.3.3) | `environment.json` records exact tool and dependency versions; same input, key file and options → same hashes and findings |
 | Reproducibility (5.3.4) | Independent verifiers (`tests/verify_chain.py`, dkimpy for DKIM), standard algorithms (RFC 6376), the key file disclosed with its digest |
 | Justifiability (5.3.5) | Every finding states what it shows and what it does **not** prove; limitations in every report |

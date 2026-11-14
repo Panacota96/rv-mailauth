@@ -503,6 +503,108 @@ fn keys_import_writes_a_normalised_key_file_and_audits_the_import() {
         ));
 }
 
+/// verify-log re-hashes every output the run's audit log records: the reports, hashes.csv, environment.json and
+/// the per-message headers.json / dkim.json (`output_written`). An edited or a deleted one fails (exit 3).
+#[test]
+fn verify_log_rehashes_every_recorded_output_of_the_sample_run() {
+    let out = tempfile::tempdir().unwrap();
+    bin()
+        .args([
+            "analyze",
+            "--progress",
+            "none",
+            "--hash",
+            "sha256,md5",
+            "-i",
+        ])
+        .arg(sample("evidence"))
+        .arg("--dkim-keys")
+        .arg(sample("dkim-keys.txt"))
+        .args(["--own-domain", "acme.example", "-o"])
+        .arg(out.path())
+        .assert()
+        .code(3);
+    let entries = audit(out.path());
+    let files: Vec<&str> = entries
+        .iter()
+        .filter(|e| e["action"] == "output_written")
+        .filter_map(|e| e["details"]["file"].as_str())
+        .collect();
+    let headers = *files
+        .iter()
+        .find(|f| f.ends_with("/headers.json"))
+        .expect("a headers.json output");
+    let dkim = *files
+        .iter()
+        .find(|f| {
+            f.ends_with("/dkim.json") && !f.starts_with(headers.trim_end_matches("headers.json"))
+        })
+        .expect("a dkim.json output of another message");
+    let logs = only_dir(&out.path().join("logs"));
+    let reports = only_dir(&out.path().join("reports"));
+    let ok = bin().arg("verify-log").arg(&logs).assert().code(0);
+    let text = String::from_utf8_lossy(&ok.get_output().stdout).into_owned();
+    let line = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("outputs: "))
+        .expect("outputs line");
+    let (verified, rest) = line.split_once(" verified of ").unwrap();
+    assert_eq!(rest, format!("{verified} recorded (md5, sha256)"), "{line}");
+    // Every per-message output is re-hashed, not skipped, on top of the reports, register and environment.
+    assert!(
+        verified.parse::<usize>().unwrap() > files.len() + 2,
+        "{line}"
+    );
+    assert!(!text.contains("not re-hashed"), "{text}");
+
+    let headers_path = reports.join(headers);
+    let saved = std::fs::read(&headers_path).unwrap();
+    std::fs::write(&headers_path, b"{\"edited\": true}\n").unwrap();
+    let dkim_path = reports.join(dkim);
+    let moved = out.path().join("moved.json");
+    std::fs::rename(&dkim_path, &moved).unwrap();
+    bin().arg("verify-log").arg(&logs).assert().code(3).stdout(
+        predicate::str::contains(format!(
+            "output reports/{headers}: md5 differs from audit entry #"
+        ))
+        .and(predicate::str::contains(format!(
+            "output reports/{dkim}: missing"
+        )))
+        .and(predicate::str::contains("1 missing, 1 changed")),
+    );
+    std::fs::write(&headers_path, saved).unwrap();
+    std::fs::rename(&moved, &dkim_path).unwrap();
+    bin().arg("verify-log").arg(&logs).assert().code(0);
+}
+
+/// The key file written by `keys import` is outside the run folder (a path the operator chose): verify-log lists
+/// it as not re-hashed, with the reason, and the run still verifies.
+#[test]
+fn keys_import_output_is_listed_as_not_rehashed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let zone = zone_with_sample_keys(tmp.path());
+    let out = tmp.path().join("out");
+    bin()
+        .args(["keys", "import"])
+        .arg(&zone)
+        .arg("--key-file")
+        .arg(tmp.path().join("keys.txt"))
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .code(0);
+    bin()
+        .arg("verify-log")
+        .arg(only_dir(&out.join("logs")))
+        .assert()
+        .code(0)
+        .stdout(
+            predicate::str::contains("1 skipped").and(predicate::str::contains(
+                "(written outside the run folder, at a path the operator chose)",
+            )),
+        );
+}
+
 #[test]
 fn keys_import_refuses_malformed_records_and_writes_nothing() {
     let tmp = tempfile::tempdir().unwrap();
