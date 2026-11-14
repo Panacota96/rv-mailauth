@@ -5,6 +5,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.2.1](https://github.com/Panacota96/rv-mailauth/compare/v0.2.0...v0.2.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **core:** late audit entries and redirected run folders cannot hide an edited output ([9539338](https://github.com/Panacota96/rv-mailauth/commit/953933800b667ca633e9ad3e2202f35164b43234))
+* **core:** re-hash the outputs a run's audit log records in verify-log and verify-case ([51c089c](https://github.com/Panacota96/rv-mailauth/commit/51c089ce449b403a3dc1622fbc3ab3debc93941d))
+* verify-log and verify-case re-hash the outputs the audit log records ([2e1c6f4](https://github.com/Panacota96/rv-mailauth/commit/2e1c6f4e8ccd7cfd1a66cd7fec4b937c9d74f118))
+
 ## [0.2.0](https://github.com/Panacota96/rv-mailauth/compare/v0.1.0...v0.2.0) (2026-11-12)
 
 
