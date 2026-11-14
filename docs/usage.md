@@ -295,8 +295,11 @@ rv-mailauth verify-log demo\CASE-DEMO\runs\rv-mailauth\20261112T121910Z-2c3dd5\l
 # OK  156 entries, chain intact: …\audit.jsonl
 #     truncation: the final entry #156 is anchored by the case log (run_finished)
 #     review entries: 2 (review.jsonl, anchored to run_finished)
+#     outputs: 251 verified of 251 recorded (sha256)
 # with a timestamp, one more line per token, e.g.:
 #     timestamp 2026-11-12T11:52:14Z by http://timestamp.digicert.com covers entry #137: TSA signature valid (signer: …); chain not checked (…)
+# and the token is listed after the outputs line:
+#     not re-hashed: logs/timestamp-00137.tsr (RFC 3161 token: checked by the timestamp verification)
 ```
 
 The `truncation:` line says what vouches for the length of the log; `review entries` counts the messages opened
@@ -307,16 +310,35 @@ in the GUI viewer after the run (an edited `review.jsonl`, or one copied from an
 a timestamp prints `truncation not detectable without a timestamp or case record`. A log shorter than its
 timestamp or case record is `BROKEN` (`truncated: …`, exit 3).
 
+The `outputs:` line is the re-hash of every file the log says the run wrote (each item's reports, each message's
+`headers.json` and `dkim.json`, `mbox_index.json`, extracted attachments, the statistics reports, `hashes.csv`,
+`environment.json`), with every algorithm the log recorded; the latest entry for a file wins. A file edited,
+deleted or replaced after the run makes the run `BROKEN` (exit 3) and is named (sample run, one byte appended to
+`statistics.json`):
+
+```text
+BROKEN  …\audit.jsonl
+  - output reports/statistics.json: sha256 differs from audit entry #155 (recorded 622c…e1f4, now 9d58…8efb): edited or replaced after the run
+    outputs: 250 verified of 251 recorded (sha256), 1 changed
+```
+
+A deleted file reads `output reports/items/<folder>/dkim.json: missing (recorded by audit entry #N): deleted or
+moved after the run`. A recorded path that is absolute, contains `..`, or resolves outside the run folder through a
+symlink or junction is rejected and never read. The timestamp token is listed as `not re-hashed` because the
+timestamp check above already verifies it; so is the key file of `keys import`, written outside the run folder.
+Files the run did not record (anything added to the folder later) are not checked.
+
 | Step | Command | Proves |
 | --- | --- | --- |
-| 1 | `rv-mailauth verify-log <log>` (exit 0 intact, 3 broken or truncated) | No entry edited, deleted or reordered; timestamp token matches the head it covers; the log still reaches the entry its timestamp covers and, in a case folder, the final entry recorded in the case log (the `truncation:` line names the anchor); `review.jsonl` intact and anchored to this run |
+| 1 | `rv-mailauth verify-log <log>` (exit 0 intact, 3 broken, truncated or an output changed) | No entry edited, deleted or reordered; timestamp token matches the head it covers; the log still reaches the entry its timestamp covers and, in a case folder, the final entry recorded in the case log (the `truncation:` line names the anchor); `review.jsonl` intact and anchored to this run |
 | 2 | `python tests/verify_chain.py <log>` (source tree) | Same, with an independent implementation; also re-hashes the evidence listed in `hashes.csv` |
 | 3 | OpenSSL ([Timestamps](#6-timestamps)) | The TSA really signed that head at that time |
-| 4 | Script below | Every report file, every per-message output (`headers.json`, `dkim.json`, attachments, `mbox_index.json`), `environment.json` and `hashes.csv` still has the digest recorded in the log |
-| 5 | `rv-mailauth verify-case <CASE> --rehash` | The run is the one the case log announced, complete up to its recorded final entry; the reachable evidence still matches the registry |
+| 4 | Step 1 (`outputs:` line); script below for an independent check | Every report file, every per-message output (`headers.json`, `dkim.json`, attachments, `mbox_index.json`), `environment.json` and `hashes.csv` still has the digest recorded in the log |
+| 5 | `rv-mailauth verify-case <CASE> --rehash` | The run is the one the case log announced, complete up to its recorded final entry, with every recorded output unchanged; the reachable evidence still matches the registry |
 | 6 | `python tests/validate_reports.py <CASE or report folder>` | Every JSON report, `case.json` and `registry.json` match their schemas |
 
-Step 4 (no built-in command yet, gap G19) — re-hash every file the run recorded:
+Step 4 is built into `verify-log` and `verify-case`. To check it with code you can read in one screen (an
+independent implementation, e.g. for an opposing expert), re-hash every file the run recorded:
 
 ```bash
 python - "<log folder>" "<report folder>" <<'EOF'
@@ -358,8 +380,8 @@ SHA256).Hash.ToLower()` and search the value in `audit.jsonl`.
 | Command | 0 | 1 | 2 | 3 | 130 |
 | --- | --- | --- | --- | --- | --- |
 | `analyze` | done, no high finding | runtime error (input not found, output not writable, wrong certificate password, case log locked) | usage error (unknown option or algorithm, three algorithms, unknown language, a `--dkim-keys` file that cannot be read, an invalid `--own-domain`; with `--case-dir`: another case's folder, `--case` missing at creation, unknown evidence id) | done, ≥ 1 high finding; or the case folder fails verification (nothing written) | cancelled (Ctrl+C), partial reports written |
-| `verify-log` | intact | log unreadable | — | broken chain, token mismatch, or truncated (shorter than its timestamp or case record) | — |
-| `verify-case` | case intact (warnings printed) | not a case folder (no `case.json`) | — | at least one check failed (with `--rehash`: an evidence file differs from the registry) | — |
+| `verify-log` | intact | log unreadable | — | broken chain, token mismatch, truncated (shorter than its timestamp or case record), or a recorded output edited, deleted or replaced | — |
+| `verify-case` | case intact (warnings printed) | not a case folder (no `case.json`) | — | at least one check failed, e.g. a run's recorded output changed (with `--rehash`: an evidence file differs from the registry) | — |
 | `timestamp` | obtained and logged | TSA unreachable (nothing changed) | — | log missing, broken or unreadable (nothing added) | — |
 | `keys import` | key file written, import logged | a source unreadable, the key file exists or cannot be written | usage error, a malformed DKIM record, two keys under one name, or no DKIM record (nothing written) | — | — |
 | `keys show` | every record is a usable key | file unreadable | at least one record is not a usable key (listed) | — | — |

@@ -582,7 +582,15 @@ CHECKS:
   - the review log: review.jsonl in the same folder (messages opened in the GUI viewer after the
     run) is checked when present: an intact hash chain whose first entry links to the run's
     run_finished entry, every entry naming this run. The output adds "review entries: N"; an
-    edited review log, or one copied from another run, is a failure.
+    edited review log, or one copied from another run, is a failure;
+  - recorded outputs: every file the log says the run wrote (item reports, statistics,
+    hashes.csv, environment.json, each message's headers.json and dkim.json) is re-hashed with
+    each algorithm recorded and compared; the latest entry for a file wins. A missing, edited or
+    replaced file is a problem; a recorded path that is absolute, contains .. or resolves
+    outside the run folder (symlink, junction) is rejected and not read. Timestamp tokens
+    (checked above) and files written outside the run folder (the key file of keys import) are
+    listed as not re-hashed, with the reason. Output: "outputs: N verified of M recorded
+    (algorithms)".
 
 EXAMPLES:
   rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
@@ -591,12 +599,16 @@ EXAMPLES:
   rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
 
 EXIT CODES:
-  0  The chain is intact and agrees with its timestamps and case record (if any).
+  0  The chain is intact and agrees with its timestamps and case record (if any), and every
+     output file it records (reports, headers.json, dkim.json, hashes.csv, environment.json)
+     still has the recorded digests.
   1  The log or the --tsa-ca file cannot be read.
   3  The chain is broken (an entry was edited, deleted or re-ordered), a timestamp does not
      match or does not verify (altered token, invalid TSA signature, chain not trusted by
-     --tsa-ca), the log is shorter than its timestamp or case record says (truncated), or
-     review.jsonl is broken or anchored to another run.
+     --tsa-ca), the log is shorter than its timestamp or case record says (truncated),
+     review.jsonl is broken or anchored to another run, or a recorded output file was edited,
+     deleted or replaced after the run (named in the output; a recorded path that leads
+     outside the run folder is rejected, not read).
 ```
 
 ## rv-mailauth self-test
@@ -686,6 +698,9 @@ CHECKS:
     recorded at run_finished is its final entry (only timestamp_obtained may follow);
   - every run's review.jsonl (messages opened in the GUI viewer after the run), when present,
     is an intact chain anchored to that run's run_finished entry ("review entries: N");
+  - every output file a run's audit log records (reports, headers.json, dkim.json, hashes.csv,
+    environment.json) is re-hashed and compared with the recorded digests (edited, deleted or
+    replaced: a problem);
   - with --rehash: every registered item still reachable at its registered path is read again
     and its digests are compared with the registry (the latest registration of a path).
 
@@ -697,8 +712,9 @@ EXIT CODES:
   0  The case folder is intact (warnings, e.g. a run still in progress or an item not
      reachable for --rehash, are printed).
   1  The folder is not a case folder (no case.json).
-  3  At least one check failed: the case was edited, truncated or re-ordered, or (--rehash)
-     an evidence file differs from the registry.
+  3  At least one check failed: the case was edited, truncated or re-ordered, a run's
+     recorded output (report, register) was edited, deleted or replaced, or (--rehash) an
+     evidence file differs from the registry.
 ```
 
 ## rv-mailauth describe

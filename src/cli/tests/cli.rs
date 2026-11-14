@@ -819,15 +819,24 @@ fn case_folder_intake_verify_case_and_tampering() {
         .collect();
     assert!(custody_ids.iter().any(|c| c.contains("E0001")));
     let runs_before = if intake { 1 } else { 2 };
+    bin().arg("verify-case").arg(&case).assert().code(0).stdout(
+        predicate::str::contains(format!("3 registered items, {} runs verified", runs_before)).and(
+            predicate::str::is_match(r"outputs: [1-9]\d* verified of [1-9]\d* recorded").unwrap(),
+        ),
+    );
+    // verify-case re-hashes every run's recorded outputs: an edited report is named, exit 3.
+    let stats = run_dir.join("reports/statistics.json");
+    let saved = std::fs::read(&stats).unwrap();
+    std::fs::write(&stats, b"{}\n").unwrap();
     bin()
         .arg("verify-case")
         .arg(&case)
         .assert()
-        .code(0)
-        .stdout(predicate::str::contains(format!(
-            "3 registered items, {} runs verified",
-            runs_before
-        )));
+        .code(3)
+        .stdout(predicate::str::contains(
+            "output reports/statistics.json: md5 differs from audit entry #",
+        ));
+    std::fs::write(&stats, saved).unwrap();
     // The case id may be left out once the case exists; --evidence selects registered items.
     case_scan(&case)
         .args(["--evidence", "E0002"])
