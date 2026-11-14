@@ -331,7 +331,7 @@ Files the run did not record (anything added to the folder later) are not checke
 | Step | Command | Proves |
 | --- | --- | --- |
 | 1 | `rv-mailauth verify-log <log>` (exit 0 intact, 3 broken, truncated or an output changed) | No entry edited, deleted or reordered; timestamp token matches the head it covers; the log still reaches the entry its timestamp covers and, in a case folder, the final entry recorded in the case log (the `truncation:` line names the anchor); `review.jsonl` intact and anchored to this run |
-| 2 | `python tests/verify_chain.py <log>` (source tree) | Same, with an independent implementation; also re-hashes the evidence listed in `hashes.csv` |
+| 2 | `python tests/verify_chain.py <log>` (source tree) | Same, with an independent implementation; also re-hashes the evidence listed in `hashes.csv` (an mbox message from its byte range in the mbox) and every output the audit log records |
 | 3 | OpenSSL ([Timestamps](#6-timestamps)) | The TSA really signed that head at that time |
 | 4 | Step 1 (`outputs:` line); script below for an independent check | Every report file, every per-message output (`headers.json`, `dkim.json`, attachments, `mbox_index.json`), `environment.json` and `hashes.csv` still has the digest recorded in the log |
 | 5 | `rv-mailauth verify-case <CASE> --rehash` | The run is the one the case log announced, complete up to its recorded final entry, with every recorded output unchanged; the reachable evidence still matches the registry |

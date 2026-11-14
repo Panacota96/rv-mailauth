@@ -457,7 +457,8 @@ Owners: **Eng.** = engineering, **Counsel**, **Examiner**, **Firm** = Rakvor man
 8. **Workstation clock** synchronised; time source noted.
 9. **The run is complete** (`run_finished`) and `rv-mailauth verify-log <log folder>` prints OK, including the
    review entries and the `outputs:` line (every report and per-message output re-hashed against
-   the audited digests); `python tests/verify_chain.py <log folder>` exits 0.
+   the audited digests); `python tests/verify_chain.py <log folder>` exits 0
+   (it also re-hashes every output the audit log records).
 10. **Timestamp** obtained and checked (`verify-log --tsa-ca`, `openssl ts -verify`), and the TSA certificate's
     revocation status at genTime established from CRL/OCSP evidence covering genTime, kept with the case.
 11. **No `PARSER_FAILED`, `FILE_STRUCTURE_DAMAGED` or expired-signature `DKIM_SIGNATURE_NOT_EVALUATED` left
