@@ -18,9 +18,36 @@ use mail_parser::{DateTime, MessageParser};
 use serde_json::json;
 use std::io::Read;
 
-/// Seconds since 1970 → "2026-11-10T10:00:00Z".
+/// Seconds since 1970 → "2026-11-10T10:00:00Z" (proleptic Gregorian UTC; years outside 0000–9999 carry a sign,
+/// as chrono wrote them before the move to jiff; None outside chrono's range, -262143-01-01..=+262142-12-31).
 pub fn rfc3339(ts: i64) -> Option<String> {
-    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    const LIMIT: i64 = 8_210_266_876_799; // 262143-12-31T23:59:59Z
+    if !(-8_334_601_228_800..=LIMIT).contains(&ts) {
+        return None;
+    }
+    let (days, sod) = (ts.div_euclid(86_400), ts.rem_euclid(86_400));
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let year = if (0..=9999).contains(&y) {
+        format!("{y:04}")
+    } else if y > 9999 {
+        format!("+{y}")
+    } else {
+        format!("-{:04}", -y)
+    };
+    Some(format!(
+        "{year}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        sod / 3600,
+        sod % 3600 / 60,
+        sod % 60
+    ))
 }
 
 fn cap(s: &str, n: usize) -> String {
@@ -922,6 +949,34 @@ pub fn analyze_message(ctx: &AnalyzeCtx, kind: ItemKind) -> Analysis {
 
 #[cfg(test)]
 mod tests {
+    /// Frozen from chrono 0.4.45 `DateTime::from_timestamp(ts, 0).format("%Y-%m-%dT%H:%M:%SZ")`.
+    #[test]
+    fn rfc3339_matches_chrono_exactly() {
+        let golden: [(i64, Option<&str>); 18] = [
+            (0, Some("1970-01-01T00:00:00Z")),
+            (1_790_848_800, Some("2026-10-01T10:00:00Z")),
+            (-1, Some("1969-12-31T23:59:59Z")),
+            (-62_135_596_800, Some("0001-01-01T00:00:00Z")),
+            (-62_167_219_200, Some("0000-01-01T00:00:00Z")),
+            (-62_198_755_200, Some("-0001-01-01T00:00:00Z")),
+            (253_402_300_799, Some("9999-12-31T23:59:59Z")),
+            (253_402_300_800, Some("+10000-01-01T00:00:00Z")),
+            (910_692_730_085, Some("+30828-09-14T02:48:05Z")),
+            (8_210_266_876_799, Some("+262142-12-31T23:59:59Z")),
+            (8_210_266_876_800, None),
+            (-8_334_601_228_800, Some("-262143-01-01T00:00:00Z")),
+            (-8_334_601_228_801, None),
+            (-8_334_632_851_200, None),
+            (-8_334_632_851_201, None),
+            (-8_334_632_764_800, None),
+            (i64::MAX, None),
+            (i64::MIN, None),
+        ];
+        for (ts, want) in golden {
+            assert_eq!(rfc3339(ts).as_deref(), want, "{ts}");
+        }
+    }
+
     use super::*;
 
     fn run(msg: &str, opts: &DomainOptions) -> MessageOutcome {
