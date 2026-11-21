@@ -4,6 +4,8 @@
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    // The start-up release check (notify only; RV_NO_UPDATE_CHECK=1 turns it off).
+    rv_mailauth_core::update::start_gui_check();
     // `<exe> worker …`: one message analysed in an isolated child process (see core worker.rs).
     if std::env::args_os().nth(1).is_some_and(|a| a == "worker") {
         std::process::exit(rv_mailauth_core::worker::worker_main());
