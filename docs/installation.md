@@ -36,6 +36,7 @@ flowchart TB
 | Memory | Files are hashed in 1 MiB chunks. Each message is parsed in its own worker process, limited to `--worker-memory-mb` (default 1024 MiB) and `--max-message-mb` (default 200 MiB); an mbox is split by a streaming byte scan, so its size does not grow memory use. |
 | Graphics | None required: the GUI also runs on VMs without a GPU driver (software rendering). |
 | Network | None, except the optional timestamp request and `--online` key lookups (see [step 7](#7-offline-and-air-gapped-use)). |
+| Release check | Optional, notify only: the desktop app at start-up and `rv-mailauth update-check` read the public latest-release page on github.com ([Release check](#release-check)); `RV_NO_UPDATE_CHECK=1` turns it off. |
 
 ## 1. Download
 
@@ -344,3 +345,16 @@ Run the sample with `--dkim-keys examples/sample/dkim-keys.txt --own-domain acme
 | Sample summary differs from step 6 | Wrong version or modified sample files; compare `environment.json` with the release notes and the sample digests with `expected_hashes.csv`. |
 | GUI window blank or very slow on a VM | No GPU driver: software rendering is used; give the VM more CPU. |
 | Building from source downloads another compiler | Expected: rustup installs the pinned 1.99.1 from `rust-toolchain.toml`. Offline, install it beforehand (`rustup toolchain install 1.99.1 --profile minimal`). |
+
+## Release check
+
+Is a newer release published? The tool can tell you; it never updates itself.
+
+| | |
+| --- | --- |
+| When | The desktop app checks once at start-up, in the background (a banner with the release page appears only when a newer release exists). The CLI checks only with `rv-mailauth update-check` (`--json` for scripts; exit 0 = latest, 3 = newer release, 1 = could not check). No other command contacts the network for it. RV Hub checks every tool it lists. |
+| What is sent | One HTTPS GET of `https://github.com/Panacota96/rv-mailauth/releases/latest` (the redirect is read, not followed) with `User-Agent: rv-mailauth/<version>` and no other header, cookie or parameter: nothing about the case, the evidence, the examiner or the machine. |
+| What it does | It names the newer version and its release page. It never downloads or installs anything: download the release and verify it (`SHA256SUMS`, Authenticode chain to the Rakvor root) as in [Verify the download](#2-verify-the-download) before use. |
+| Audit | The check is not part of a run and is not written to any audit log; a failed or slow check (offline, 5 s timeout) never blocks the tool. |
+| Turn it off | `RV_NO_UPDATE_CHECK=1` (any value but empty or `0`), or the file `update-check-off` in `%APPDATA%\Rakvor` (RV Hub's setting writes it): off for every Rakvor tool on this PC. |
+| Code | [src/core/src/update.rs](../src/core/src/update.rs) (shared, byte-identical, by every Rakvor tool) |
