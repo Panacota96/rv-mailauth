@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.3.1](https://github.com/Panacota96/rv-mailauth/compare/v0.3.0...v0.3.1) (2026-11-24)
+
+
+### Performance Improvements
+
+* **verify:** stream the audit log instead of holding every entry ([#13](https://github.com/Panacota96/rv-mailauth/issues/13)) ([1609fd7](https://github.com/Panacota96/rv-mailauth/commit/1609fd79b9ca007e486b4240e2aeea2cdbcd5474))
+
 ## [0.3.0](https://github.com/Panacota96/rv-mailauth/compare/v0.2.2...v0.3.0) (2026-11-21)
 
 
