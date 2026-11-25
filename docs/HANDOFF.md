@@ -98,8 +98,10 @@ logged; no GPL/AGPL/LGPL components; tools report signals, not verdicts.
 
 ## 6. Open work
 
-- The licence (`LICENSE`) and the admissibility analysis ([admissibility.md](admissibility.md)) are drafts pending a
-  lawyer's review (Colombia and France); every citation marked [to verify] must be checked first.
+- Licence: PolyForm Noncommercial 1.0.0 (`LICENSE`, owner decision 2026-11-24; commercial use needs a licence from
+  Rakvor, `COMMERCIAL.md`). Rakvor's licensing texts (`COMMERCIAL.md`, `NOTICE`) and the admissibility analysis
+  ([admissibility.md](admissibility.md)) are drafts pending a lawyer's review (Colombia and France); every citation
+  marked [to verify] must be checked first.
 - **Signature expiry (`x=`) is checked against the analysis clock.** mail-auth 0.15 rejects a signature whose `x=`
   is in the past *today* as expired, before it computes the body hash; such signatures are reported
   `DKIM_SIGNATURE_NOT_EVALUATED` (reason: signature expired). Evaluating them as of the sending time needs a

@@ -134,7 +134,7 @@ sequenceDiagram
 
 | Artifact | Built by |
 | --- | --- |
-| `rv-mailauth-X.Y.Z-windows-x64.zip` | portable: both executables, README, LICENSE, NOTICE, docs, examples (sample scripts and expectations included) |
+| `rv-mailauth-X.Y.Z-windows-x64.zip` | portable: both executables, README, LICENSE, COMMERCIAL.md, NOTICE, docs, examples (sample scripts and expectations included) |
 | `rv-mailauth-X.Y.Z-windows-x64-setup.exe` | Inno Setup (`packaging/windows/installer.iss`), per-user install, adds the CLI to PATH; ships the sample evidence and `dkim-keys.txt` |
 | `SHA256SUMS` | over the assets |
 | `sbom.cdx.json` | `cargo cyclonedx` |

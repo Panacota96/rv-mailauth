@@ -44,7 +44,7 @@ Release assets on the GitHub Releases page of the repository (`Panacota96/rv-mai
 
 | Asset | What it is |
 | --- | --- |
-| `rv-mailauth-X.Y.Z-windows-x64.zip` | Portable: `rv-mailauth.exe`, `rv-mailauth-gui.exe`, README, LICENSE, NOTICE, CHANGELOG, `docs/`, `examples/` |
+| `rv-mailauth-X.Y.Z-windows-x64.zip` | Portable: `rv-mailauth.exe`, `rv-mailauth-gui.exe`, README, LICENSE, COMMERCIAL.md, NOTICE, CHANGELOG, `docs/`, `examples/` |
 | `rv-mailauth-X.Y.Z-windows-x64-setup.exe` | Inno Setup installer, per-user |
 | `SHA256SUMS` | SHA-256 of the zip, the installer and the SBOM (`sha256sum` format: `<hash>  ./<file>`) |
 | `sbom.cdx.json` | CycloneDX software bill of materials (every Rust dependency and version) |
@@ -155,7 +155,7 @@ Unattended:
 .\rv-mailauth-0.1.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="addtopath"
 ```
 
-The installer copies the executables, README, LICENSE, NOTICE, CHANGELOG, `docs\`, the sample evidence
+The installer copies the executables, README, LICENSE, COMMERCIAL.md, NOTICE, CHANGELOG, `docs\`, the sample evidence
 (`examples\sample\evidence\`) and the sample's public keys (`examples\sample\dkim-keys.txt`), not the sample
 scripts, `expected_findings.json` or `expected_hashes.csv` (those are in the zip and the source tree).
 
