@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.3.2](https://github.com/Panacota96/rv-mailauth/compare/v0.3.1...v0.3.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **trust:** accept leap seconds only at 23:59:60; test imprint and nonce bounds ([#18](https://github.com/Panacota96/rv-mailauth/issues/18)) ([7c8358d](https://github.com/Panacota96/rv-mailauth/commit/7c8358df69dcd8ed50c260b1e1e4d3c916ce0012))
+* **trust:** reject malformed timestamp times instead of panicking; require the nonce ([#16](https://github.com/Panacota96/rv-mailauth/issues/16)) ([b0e4d92](https://github.com/Panacota96/rv-mailauth/commit/b0e4d9268e1a7894c98cce27e3ad48ae6256b8e7))
+
 ## [0.3.1](https://github.com/Panacota96/rv-mailauth/compare/v0.3.0...v0.3.1) (2026-11-24)
 
 
