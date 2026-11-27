@@ -2,6 +2,8 @@
 
 # RV MailAuth
 
+**English** · [Español](README.es.md) · [Français](README.fr.md)
+
 <!-- forge:description -->
 **Email authenticity signals.** Checks .eml, Outlook .msg and .mbox files: DKIM and ARC signatures re-verified offline with examiner-supplied keys, the Received path, dates and time zones, Message-ID, attachments and business-email-compromise signals.
 <!-- /forge:description -->
@@ -95,6 +97,8 @@ rv-mailauth verify-log E:\CASE-014\runs\rv-mailauth\<RUN-ID>\logs
 the DKIM key file and your own domains under *5. Options*, press *Start review*, then **Open** any message to see
 its hops, DKIM table and findings ([docs/usage-gui.md](docs/usage-gui.md)).
 
+The common tasks, step by step: [docs/quick-guide.md](docs/quick-guide.md).
+
 Try it on the synthetic sample: `examples/sample/run.sh target/release/rv-mailauth` (or `run.ps1`), expected exit
 code 3 — two messages were edited after signing ([examples/](examples/README.md)).
 
@@ -144,6 +148,7 @@ The full list, with owners and remedies: [docs/admissibility.md](docs/admissibil
 
 | Page | For |
 | --- | --- |
+| [docs/quick-guide.md](docs/quick-guide.md) | The six common tasks (analyze, case folder, verify-log, verify-case, timestamp, DKIM key files), every GUI button, exit codes |
 | [docs/usage.md](docs/usage.md) | End-to-end case: rv-hashinv intake, keys import, analysis, GUI viewer, `verify-case`, interpreting each finding, troubleshooting |
 | [docs/usage-gui.md](docs/usage-gui.md) | The desktop app and the message viewer |
 | [docs/usage-cli.md](docs/usage-cli.md) | Every command and option (generated from `--help`) |
@@ -158,6 +163,9 @@ The full list, with owners and remedies: [docs/admissibility.md](docs/admissibil
 | [docs/HANDOFF.md](docs/HANDOFF.md) | State, layout, everyday commands, decisions, open work |
 | [docs/adr/](docs/adr/) | Architecture decisions (language, timestamp verification, advisories, email design) |
 
+The README, the quick guide, the usage guide, the desktop-app guide and the installation guide also exist in Spanish
+(`.es.md`) and French (`.fr.md`); the English pages are the reference.
+
 ## Project layout
 
 ```text
@@ -170,6 +178,7 @@ rv-mailauth/
 ├── i18n/          report and GUI wording: en.json, es.json, fr.json
 ├── schemas/       JSON Schemas of the reports, case folder and describe output
 ├── docs/          documentation (Mermaid diagrams render on GitHub)
+├── scripts/       docs checks (translations keep the shape of the English pages)
 ├── tests/         sample generator, dkimpy oracle, Python verifiers, golden case, TSA fixtures
 ├── examples/      synthetic sample evidence, public DKIM keys, expected findings and hashes, run scripts
 ├── packaging/     Windows installer (Inno Setup)

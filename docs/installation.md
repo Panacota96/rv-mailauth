@@ -174,8 +174,8 @@ rv-mailauth --version
 rv-mailauth self-test
 ```
 
-`self-test` prints `PASS` for md5, sha1, sha256, sha512, sha3-256 and blake3 (known answers for `"abc"`), exit code
-0. It tests the hash implementations only. Then run the synthetic sample (16 email files, 19 items), which
+`self-test` prints `PASS` for md5, sha1, sha256, sha512, sha3-256 and blake3 (known answers for `"abc"`), exit
+code 0. It tests the hash implementations only. Then run the synthetic sample (16 email files, 19 items), which
 exercises DKIM and ARC with the sample's public keys, the date, hop and BEC checks, `.msg` and mbox handling,
 reports and the audit chain:
 
@@ -216,12 +216,13 @@ Keep the console output and the run folder as the record of this verification.
 
 ## 7. Offline and air-gapped use
 
-The network is used in two places only: the RFC 3161 timestamp request (one HTTP POST of a 32-byte hash to the
-TSA, [src/core/src/trust.rs](../src/core/src/trust.rs)), and, only with `analyze --online` (GUI: *Fetch today's DNS
+Besides the optional release check ([Release check](#release-check)), the network is used in two places only: the
+RFC 3161 timestamp request (one HTTP POST of a 32-byte hash to the TSA,
+[src/core/src/trust.rs](../src/core/src/trust.rs)), and, only with `analyze --online` (GUI: *Fetch today's DNS
 keys*), DNS TXT lookups of the missing DKIM keys `selector._domainkey.domain` through the system resolver, in the
 main process ([src/core/src/dnsfetch.rs](../src/core/src/dnsfetch.rs)); the worker processes contain no network
 code. `--online` is off by default, and each lookup reveals to the DNS which domains are examined. There is no
-telemetry, update check or licence check.
+telemetry or licence check.
 
 | To disable the timestamp | How |
 | --- | --- |
@@ -233,7 +234,9 @@ telemetry, update check or licence check.
 An offline run with the timestamp enabled still completes: it logs `timestamp_pending` and the statistics report
 shows a warning. Later, on a machine that can reach the TSA, run `rv-mailauth timestamp <log folder>` (it
 re-verifies the chain, then appends `timestamp_obtained`). To use an internal or qualified TSA, pass `--tsa-url`
-(see [admissibility.md](admissibility.md#53-eidas--regulation-eu-9102014-as-amended-by-eu-20241183)). The network
+(see [admissibility.md](admissibility.md#53-eidas--regulation-eu-9102014-as-amended-by-eu-20241183)). The timestamp is
+eIDAS-qualified only if the TSA address is that of a qualified trust service provider (QTSP) on an EU trusted list;
+the default address (DigiCert) is not one. The network
 restriction is not enforced by the OS; on a connected workstation, a Windows Firewall outbound rule for
 `rv-mailauth.exe` / `rv-mailauth-gui.exe` allowing only the TSA host enforces it.
 

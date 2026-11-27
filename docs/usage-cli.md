@@ -292,23 +292,34 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  Review one message offline with the sender's archived DKIM key (SHA-256, English reports):
-    rv-mailauth analyze --input evidence/invoice.eml --dkim-keys keys/example-org-2026.txt
+  Review one message offline with the sender's archived DKIM keys (SHA-256, English reports):
+    rv-mailauth analyze --input D:\evidence\01-clean-rsa.eml --dkim-keys dkim-keys.txt
   Review a folder and its subfolders with SHA-256 + MD5, Spanish reports, our own domain:
-    rv-mailauth analyze -i D:\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014 \
-      --dkim-keys case-keys.txt --own-domain acme.example
+    rv-mailauth analyze -i D:\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014
+    --dkim-keys dkim-keys.txt --own-domain acme.example
   Review the files listed in a text file, reports in the three languages, machine-readable progress:
     rv-mailauth analyze --input-list files.txt --lang all --progress jsonl > events.jsonl
   Large mbox: copy the attachments out, reports only for flagged messages:
-    rv-mailauth analyze -i E:\export\inbox.mbox --extract-attachments --item-reports flagged
+    rv-mailauth analyze -i D:\evidence\12-mailbox.mbox --extract-attachments --item-reports flagged
+  Slow servers and an old mailbox: wider clock tolerance, mboxo, larger limits:
+    rv-mailauth analyze -i D:\evidence\12-mailbox.mbox --clock-skew 900 --mbox-variant mboxo
+    --max-message-mb 1024 --max-mbox-messages 200000 --worker-timeout 600 --worker-memory-mb 4096
+  Keys missing from the key file, fetched from today's DNS (weaker evidence; every lookup is
+  audited):
+    rv-mailauth analyze -i D:\evidence\15-forwarded-unknown-key.eml --dkim-keys dkim-keys.txt
+    --online
   Turn archived DNS records into a key file first; verify the audit log afterwards:
     rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
-    rv-mailauth verify-log rakvor-out/logs/<RUN-ID>/audit.jsonl
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
   Analyse every item registered in a case folder (after rv-hashinv intake), then verify the case:
     rv-mailauth analyze --case-dir E:\CASE-014 --dkim-keys E:\CASE-014\keys.txt
     rv-mailauth verify-case E:\CASE-014
   Analyse two registered items of the case only:
     rv-mailauth analyze --case-dir E:\CASE-014 --evidence E0001,E0002
+  Offline lab: no timestamp request now; add it later with `rv-mailauth timestamp <LOG>`:
+    rv-mailauth analyze -i D:\evidence -r --no-timestamp
+  The summary starts with DONE, "DONE (high-severity findings)" (exit code 3) or CANCELLED,
+  then gives the counts, the timestamp status and the report and log folders.
 
 EXIT CODES:
   0    Completed; no high-severity finding.
@@ -417,8 +428,9 @@ DESCRIPTION:
   `keys show` lists what a key file holds. Nothing is ever fetched from the network.
 
 EXAMPLES:
-  rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
-  rv-mailauth keys show case-keys.txt
+  Turn an archived DNS zone into a key file, then list what it holds:
+    rv-mailauth keys import dns-archive-2026-03.zone --key-file keys-2026-03.txt
+    rv-mailauth keys show keys-2026-03.txt
 ```
 
 ## rv-mailauth keys import
@@ -495,9 +507,15 @@ FORENSIC NOTES:
     it. `rv-mailauth verify-log <LOG>` checks the import log later.
 
 EXAMPLES:
-  rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
-  rv-mailauth keys import example-org.txt mailer-example-com.zone --key-file keys.txt -o E:\lab \
-    --case CASE-014 --actor "Ana Ruiz"
+  Import the DKIM records of an archived zone into a new key file (the import is audited):
+    rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
+  Merge two archives, the import log in another folder, for a case and an examiner, offline:
+    rv-mailauth keys import example-org.txt mailer-example-com.zone --key-file keys.txt -o lab
+    --case CASE-014 --actor "Ana Ruiz" --no-timestamp
+  Timestamp the import log with another RFC 3161 authority:
+    rv-mailauth keys import dns-archive-2026-03.zone --key-file keys-freetsa.txt --tsa-url
+    https://freetsa.org/tsr
+  The output names every key imported and the SHA-256 of the key file written.
 
 EXIT CODES:
   0  The key file was written and the import logged.
@@ -529,8 +547,10 @@ DESCRIPTION:
   SHA-256, then every record `analyze` could not use. Nothing is written.
 
 EXAMPLES:
-  rv-mailauth keys show case-keys.txt
-  rv-mailauth keys show examples/sample/dkim-keys.txt
+  List the keys of a key file written by `keys import`:
+    rv-mailauth keys show case-keys.txt
+  Check the sample key file (simple and BIND records):
+    rv-mailauth keys show examples/sample/dkim-keys.txt
 
 EXIT CODES:
   0  Every record of the file is a usable DKIM key.
@@ -596,10 +616,15 @@ CHECKS:
     (algorithms)".
 
 EXAMPLES:
-  rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
-  rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
-  rv-mailauth verify-log E:\CASE-014\runs\rv-mailauth\20261019T101500Z-a1b2c3\logs
-  rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
+  Verify a standalone run (its log folder, or the audit.jsonl in it):
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
+  Verify a run inside a case folder:
+    rv-mailauth verify-log E:\CASE-014\runs\rv-mailauth\20261019T101500Z-a1b2c3\logs
+  Also validate the TSA certificate chain against the TSA's own root certificates:
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
+  An intact log prints "OK  <N> entries, chain intact", then the timestamp, truncation and
+  outputs lines; an altered one prints BROKEN and one line per problem (exit code 3).
 
 EXIT CODES:
   0  The chain is intact and agrees with its timestamps and case record (if any), and every
@@ -626,7 +651,8 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  rv-mailauth self-test
+  Check this build before casework (one PASS or FAIL line per algorithm):
+    rv-mailauth self-test
 
 EXIT CODES:
   0  All algorithms give the published answer for the input "abc".
@@ -661,8 +687,13 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3
-  rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-url https://freetsa.org/tsr
+  The run was offline (timestamp_pending): add the timestamp once the network is back:
+    rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3
+  Use another RFC 3161 authority:
+    rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-url https://freetsa.org/tsr
+  Name the examiner in the new audit entry:
+    rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --actor "Ana Ruiz"
+  Success prints "OK  timestamp <TIME> by <TSA> covers entry #<N>"; then run verify-log.
 
 EXIT CODES:
   0  Timestamp obtained and logged.
@@ -708,8 +739,12 @@ CHECKS:
     and its digests are compared with the registry (the latest registration of a path).
 
 EXAMPLES:
-  rv-mailauth verify-case E:\CASE-014
-  rv-mailauth verify-case E:\CASE-014 --rehash
+  Check the case log, the registry and every run of the case:
+    rv-mailauth verify-case E:\CASE-014
+  Also read every registered item again and compare it with the registry:
+    rv-mailauth verify-case E:\CASE-014 --rehash
+  An intact case prints "OK  case <ID>: ..." and an outputs line; a failed check prints
+  BROKEN and one line per problem (exit code 3).
 
 EXIT CODES:
   0  The case folder is intact (warnings, e.g. a run still in progress or an item not
@@ -747,8 +782,10 @@ OFF SWITCH:
   %APPDATA%\Rakvor (RV Hub's setting), turns the check off for every Rakvor tool.
 
 EXAMPLES:
-  rv-mailauth update-check
-  rv-mailauth update-check --json
+  Ask whether a newer release is published (one line):
+    rv-mailauth update-check
+  The same answer as JSON, for scripts:
+    rv-mailauth update-check --json
 
 EXIT CODES:
   0  This is the latest release, or the check is turned off.
@@ -781,7 +818,8 @@ DESCRIPTION:
   gui_exe, exit_codes. Nothing is read or written; no audit log is created.
 
 EXAMPLES:
-  rv-mailauth describe --json
+  Print the description that RV Hub reads:
+    rv-mailauth describe --json
 
 EXIT CODES:
   0  The description was printed.

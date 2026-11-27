@@ -56,23 +56,30 @@ DESCRIPTION:
 
 const ANALYZE_AFTER_HELP: &str = "\
 EXAMPLES:
-  Review one message offline with the sender's archived DKIM key (SHA-256, English reports):
-    rv-mailauth analyze --input evidence/invoice.eml --dkim-keys keys/example-org-2026.txt
+  Review one message offline with the sender's archived DKIM keys (SHA-256, English reports):
+    rv-mailauth analyze --input D:\\evidence\\01-clean-rsa.eml --dkim-keys dkim-keys.txt
   Review a folder and its subfolders with SHA-256 + MD5, Spanish reports, our own domain:
-    rv-mailauth analyze -i D:\\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014 \\
-      --dkim-keys case-keys.txt --own-domain acme.example
+    rv-mailauth analyze -i D:\\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014 --dkim-keys dkim-keys.txt --own-domain acme.example
   Review the files listed in a text file, reports in the three languages, machine-readable progress:
     rv-mailauth analyze --input-list files.txt --lang all --progress jsonl > events.jsonl
   Large mbox: copy the attachments out, reports only for flagged messages:
-    rv-mailauth analyze -i E:\\export\\inbox.mbox --extract-attachments --item-reports flagged
+    rv-mailauth analyze -i D:\\evidence\\12-mailbox.mbox --extract-attachments --item-reports flagged
+  Slow servers and an old mailbox: wider clock tolerance, mboxo, larger limits:
+    rv-mailauth analyze -i D:\\evidence\\12-mailbox.mbox --clock-skew 900 --mbox-variant mboxo --max-message-mb 1024 --max-mbox-messages 200000 --worker-timeout 600 --worker-memory-mb 4096
+  Keys missing from the key file, fetched from today's DNS (weaker evidence; every lookup is audited):
+    rv-mailauth analyze -i D:\\evidence\\15-forwarded-unknown-key.eml --dkim-keys dkim-keys.txt --online
   Turn archived DNS records into a key file first; verify the audit log afterwards:
     rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
-    rv-mailauth verify-log rakvor-out/logs/<RUN-ID>/audit.jsonl
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
   Analyse every item registered in a case folder (after rv-hashinv intake), then verify the case:
     rv-mailauth analyze --case-dir E:\\CASE-014 --dkim-keys E:\\CASE-014\\keys.txt
     rv-mailauth verify-case E:\\CASE-014
   Analyse two registered items of the case only:
     rv-mailauth analyze --case-dir E:\\CASE-014 --evidence E0001,E0002
+  Offline lab: no timestamp request now; add it later with `rv-mailauth timestamp <LOG>`:
+    rv-mailauth analyze -i D:\\evidence -r --no-timestamp
+  The summary starts with DONE, \"DONE (high-severity findings)\" (exit code 3) or CANCELLED,
+  then gives the counts, the timestamp status and the report and log folders.
 
 EXIT CODES:
   0    Completed; no high-severity finding.
@@ -165,8 +172,9 @@ DESCRIPTION:
   `keys show` lists what a key file holds. Nothing is ever fetched from the network.
 
 EXAMPLES:
-  rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
-  rv-mailauth keys show case-keys.txt";
+  Turn an archived DNS zone into a key file, then list what it holds:
+    rv-mailauth keys import dns-archive-2026-03.zone --key-file keys-2026-03.txt
+    rv-mailauth keys show keys-2026-03.txt";
 
 const KEYS_IMPORT_AFTER_HELP: &str = "\
 DESCRIPTION:
@@ -195,9 +203,13 @@ FORENSIC NOTES:
     it. `rv-mailauth verify-log <LOG>` checks the import log later.
 
 EXAMPLES:
-  rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
-  rv-mailauth keys import example-org.txt mailer-example-com.zone --key-file keys.txt -o E:\\lab \\
-    --case CASE-014 --actor \"Ana Ruiz\"
+  Import the DKIM records of an archived zone into a new key file (the import is audited):
+    rv-mailauth keys import dns-archive-2026-03.zone --key-file case-keys.txt
+  Merge two archives, the import log in another folder, for a case and an examiner, offline:
+    rv-mailauth keys import example-org.txt mailer-example-com.zone --key-file keys.txt -o lab --case CASE-014 --actor \"Ana Ruiz\" --no-timestamp
+  Timestamp the import log with another RFC 3161 authority:
+    rv-mailauth keys import dns-archive-2026-03.zone --key-file keys-freetsa.txt --tsa-url https://freetsa.org/tsr
+  The output names every key imported and the SHA-256 of the key file written.
 
 EXIT CODES:
   0  The key file was written and the import logged.
@@ -212,8 +224,10 @@ DESCRIPTION:
   SHA-256, then every record `analyze` could not use. Nothing is written.
 
 EXAMPLES:
-  rv-mailauth keys show case-keys.txt
-  rv-mailauth keys show examples/sample/dkim-keys.txt
+  List the keys of a key file written by `keys import`:
+    rv-mailauth keys show case-keys.txt
+  Check the sample key file (simple and BIND records):
+    rv-mailauth keys show examples/sample/dkim-keys.txt
 
 EXIT CODES:
   0  Every record of the file is a usable DKIM key.
@@ -273,10 +287,15 @@ CHECKS:
     (algorithms)\".
 
 EXAMPLES:
-  rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
-  rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
-  rv-mailauth verify-log E:\\CASE-014\\runs\\rv-mailauth\\20261019T101500Z-a1b2c3\\logs
-  rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
+  Verify a standalone run (its log folder, or the audit.jsonl in it):
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
+  Verify a run inside a case folder:
+    rv-mailauth verify-log E:\\CASE-014\\runs\\rv-mailauth\\20261019T101500Z-a1b2c3\\logs
+  Also validate the TSA certificate chain against the TSA's own root certificates:
+    rv-mailauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
+  An intact log prints \"OK  <N> entries, chain intact\", then the timestamp, truncation and
+  outputs lines; an altered one prints BROKEN and one line per problem (exit code 3).
 
 EXIT CODES:
   0  The chain is intact and agrees with its timestamps and case record (if any), and every
@@ -305,7 +324,8 @@ EXIT CODES:
     /// Check every hash algorithm against known-answer test vectors.
     #[command(after_long_help = "\
 EXAMPLES:
-  rv-mailauth self-test
+  Check this build before casework (one PASS or FAIL line per algorithm):
+    rv-mailauth self-test
 
 EXIT CODES:
   0  All algorithms give the published answer for the input \"abc\".
@@ -314,8 +334,13 @@ EXIT CODES:
     /// Add an RFC 3161 timestamp to a finished run (e.g. after working offline).
     #[command(after_long_help = "\
 EXAMPLES:
-  rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3
-  rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-url https://freetsa.org/tsr
+  The run was offline (timestamp_pending): add the timestamp once the network is back:
+    rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3
+  Use another RFC 3161 authority:
+    rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-url https://freetsa.org/tsr
+  Name the examiner in the new audit entry:
+    rv-mailauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --actor \"Ana Ruiz\"
+  Success prints \"OK  timestamp <TIME> by <TSA> covers entry #<N>\"; then run verify-log.
 
 EXIT CODES:
   0  Timestamp obtained and logged.
@@ -355,8 +380,12 @@ CHECKS:
     and its digests are compared with the registry (the latest registration of a path).
 
 EXAMPLES:
-  rv-mailauth verify-case E:\\CASE-014
-  rv-mailauth verify-case E:\\CASE-014 --rehash
+  Check the case log, the registry and every run of the case:
+    rv-mailauth verify-case E:\\CASE-014
+  Also read every registered item again and compare it with the registry:
+    rv-mailauth verify-case E:\\CASE-014 --rehash
+  An intact case prints \"OK  case <ID>: ...\" and an outputs line; a failed check prints
+  BROKEN and one line per problem (exit code 3).
 
 EXIT CODES:
   0  The case folder is intact (warnings, e.g. a run still in progress or an item not
@@ -389,8 +418,10 @@ OFF SWITCH:
   %APPDATA%\\Rakvor (RV Hub's setting), turns the check off for every Rakvor tool.
 
 EXAMPLES:
-  rv-mailauth update-check
-  rv-mailauth update-check --json
+  Ask whether a newer release is published (one line):
+    rv-mailauth update-check
+  The same answer as JSON, for scripts:
+    rv-mailauth update-check --json
 
 EXIT CODES:
   0  This is the latest release, or the check is turned off.
@@ -404,7 +435,13 @@ EXIT CODES:
         json: bool,
     },
     /// Print the full help of every command as Markdown (used to generate docs/usage-cli.md).
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        after_long_help = "\
+EXAMPLES:
+  Regenerate the command-line reference:
+    rv-mailauth docs-cli > docs/usage-cli.md"
+    )]
     DocsCli,
     /// Describe this tool as JSON (schema rakvor.describe/1) for RV Hub and scripts.
     #[command(hide = true, after_long_help = DESCRIBE_AFTER_HELP)]
@@ -427,7 +464,8 @@ DESCRIPTION:
   gui_exe, exit_codes. Nothing is read or written; no audit log is created.
 
 EXAMPLES:
-  rv-mailauth describe --json
+  Print the description that RV Hub reads:
+    rv-mailauth describe --json
 
 EXIT CODES:
   0  The description was printed.";
@@ -1371,5 +1409,141 @@ fn update_check(json: bool) -> u8 {
         update::Check::Available { .. } => 3,
         update::Check::Failed { .. } => 1,
         update::Check::UpToDate { .. } | update::Check::Disabled { .. } => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The command lines listed under EXAMPLES: in a long help (lines that start with the tool name).
+    fn examples(help: &str) -> Vec<String> {
+        let Some(section) = help.split("EXAMPLES:\n").nth(1) else {
+            return vec![];
+        };
+        // Commands are indented by 4. clap wraps a long one onto further lines with the same indent (a longer
+        // tool name after scaffolding can push it past the width): those lines continue the command.
+        let prefix = format!("{} ", TOOL_NAME);
+        let mut out: Vec<String> = vec![];
+        let mut in_command = false;
+        for l in section
+            .lines()
+            .take_while(|l| l.is_empty() || l.starts_with(' '))
+        {
+            let t = l.trim();
+            if t.starts_with(&prefix) {
+                out.push(t.to_string());
+                in_command = true;
+            } else if in_command && l.starts_with("    ") && !t.is_empty() {
+                if let Some(last) = out.last_mut() {
+                    last.push(' ');
+                    last.push_str(t);
+                }
+            } else {
+                in_command = false;
+            }
+        }
+        out
+    }
+
+    /// Splits an example like a shell would for these simple lines: whitespace, "double quotes", and a final
+    /// `> FILE` redirection that is not an argument.
+    fn split_args(line: &str) -> Vec<String> {
+        let (mut args, mut cur, mut quoted, mut any) = (vec![], String::new(), false, false);
+        for c in line.chars() {
+            match c {
+                '"' => {
+                    quoted = !quoted;
+                    any = true;
+                }
+                c if c.is_whitespace() && !quoted => {
+                    if any {
+                        args.push(std::mem::take(&mut cur));
+                        any = false;
+                    }
+                }
+                c => {
+                    cur.push(c);
+                    any = true;
+                }
+            }
+        }
+        if any {
+            args.push(cur);
+        }
+        if let Some(i) = args.iter().position(|a| a == ">") {
+            args.truncate(i);
+        }
+        args
+    }
+
+    /// Every (sub)command below the root with its path of names: `["analyze"]`, `["keys", "import"]`, …
+    fn commands(
+        cmd: &clap::Command,
+        path: Vec<String>,
+        out: &mut Vec<(Vec<String>, clap::Command)>,
+    ) {
+        for sub in cmd.get_subcommands().filter(|s| s.get_name() != "help") {
+            let mut p = path.clone();
+            p.push(sub.get_name().to_string());
+            out.push((p.clone(), sub.clone()));
+            commands(sub, p, out);
+        }
+    }
+
+    #[test]
+    fn every_subcommand_has_worked_examples_that_parse() {
+        let mut root = Cli::command().term_width(100);
+        root.build();
+        let mut all = vec![];
+        commands(&root, vec![], &mut all);
+        let mut checked = 0;
+        for (path, sub) in all {
+            let help = sub.clone().render_long_help().to_string();
+            let lines = examples(&help);
+            assert!(
+                lines
+                    .first()
+                    .is_some_and(|l| split_args(l).get(1..=path.len()) == Some(&path[..])),
+                "`{} {}` has no EXAMPLES of itself",
+                TOOL_NAME,
+                path.join(" ")
+            );
+            for line in lines {
+                let args = split_args(&line);
+                if let Err(e) = Cli::try_parse_from(&args) {
+                    panic!("example `{}` does not parse: {}", line, e);
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked >= 25, "{} examples", checked);
+    }
+
+    /// tests/examples.rs runs the examples of every subcommand that docs-cli documents (visible ones and
+    /// `describe`, with their visible children) plus `docs-cli`; any other hidden subcommand would be only
+    /// parsed, so it must be added there.
+    #[test]
+    fn example_runner_sees_every_subcommand() {
+        let mut root = Cli::command();
+        root.build();
+        let mut all = vec![];
+        commands(&root, vec![], &mut all);
+        for (path, sub) in all {
+            let name = path.join(" ");
+            assert!(
+                !sub.is_hide_set() || name == "describe" || name == "docs-cli",
+                "hidden subcommand `{}`: run its examples in tests/examples.rs (or list it in PARSE_ONLY there)",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn split_args_handles_quotes_and_redirection() {
+        assert_eq!(
+            split_args(r#"rv-mailauth timestamp L --actor "Ana Ruiz" > out.txt"#),
+            ["rv-mailauth", "timestamp", "L", "--actor", "Ana Ruiz"]
+        );
     }
 }
