@@ -2,8 +2,8 @@
 
 This guide walks an examiner through one email case end to end: registering the evidence with **rv-hashinv**,
 preparing the DKIM keys, analysing with **rv-mailauth**, reviewing messages in the desktop app, and verifying the
-whole case before handing it over. Every option: [usage-cli.md](usage-cli.md) (generated from `--help`). The
-desktop app: [usage-gui.md](usage-gui.md). Why each step works: [theory.md](theory.md). What each report holds:
+whole case before handing it over. The common tasks in short: [quick-guide.md](quick-guide.md). Every option: [usage-cli.md](usage-cli.md)
+(generated from `--help`). The desktop app: [usage-gui.md](usage-gui.md). Why each step works: [theory.md](theory.md). What each report holds:
 [reports.md](reports.md).
 
 ```mermaid
